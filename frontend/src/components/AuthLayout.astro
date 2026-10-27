@@ -1,0 +1,22 @@
+---
+// 认证页布局：居中卡片
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · UniDNS</title>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

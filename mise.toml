@@ -1,0 +1,18 @@
+# unidns 开发环境配置（mise）。
+# 安装 mise 并在 shell 中激活后，进入仓库目录自动加载本文件。
+# 版本取自当前全局工具链：pnpm 12.14.0 / rust 1.99.1 / just 1.59.0。
+
+[tools]
+# Rust 1.99.1：clippy / rustfmt 随工具链一起安装。
+rust = { version = "1.99.1", components = ["clippy", "rustfmt"] }
+
+# 前端包管理器：对应 frontend/（Astro 5）的构建工具链。
+pnpm = "12.14.0"
+
+# 任务运行器（justfile）。
+just = "1.59.0"
+
+[env]
+# 本地私密环境变量（真实凭据测试变量等）由 .env 加载：
+# 复制下方变量并填入真实值即可供 #[ignore] 集成测试使用。.env 已被 .gitignore 忽略。
+_.file = ".env"

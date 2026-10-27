@@ -1,0 +1,98 @@
+# zensical 文档站点配置：https://zensical.org/docs/
+#
+# 文档源就是仓库里的 docs/（zensical 默认 docs_dir 即 docs），构建产物输出到
+# site/（已在 .gitignore 中忽略）。
+
+[project]
+site_name = "UniDNS"
+site_description = "多平台 DNS 记录统一管理：聚合阿里云/DNSPod/EdgeOne/CloudFlare，一次查看与编辑全部域名记录"
+# site_url 待文档站点有正式域名后再填，留空不会影响本地构建与预览。
+repo_url = "https://github.com/jetsung/unidns"
+repo_name = "jetsung/unidns"
+edit_uri = "edit/dev/docs/"
+copyright = "Copyright &copy;  Jetsung Chan"
+language = "zh"
+
+# 自定义 CSS：拓宽正文列（默认 .md-grid 限 61rem，见 docs/stylesheets/extra.css）。
+extra_css = ["stylesheets/extra.css"]
+
+# 章节顺序即左侧导航顺序，与 docs/ 下的序号一致。
+nav = [
+  { "首页" = "index.md" },
+  { "架构设计" = "01-architecture.md" },
+  { "快速开始" = "02-getting-started.md" },
+  { "配置参考" = "03-configuration.md" },
+  { "DNS 提供商" = "04-providers.md" },
+  { "REST API" = "05-api.md" },
+  { "本地开发" = "06-development.md" },
+]
+
+[project.theme]
+language = "zh"
+features = [
+  "announce.dismiss",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "切换到浅色模式"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "切换到深色模式"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "切换到跟随系统"
+
+# 与 zensical 模板保持一致的一组扩展：代码高亮/复制、提示块、脚注、表格、
+# Mermaid 围栏等。
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.arithmatex.generic = true
+pymdownx.betterem = {}
+pymdownx.caret = {}
+pymdownx.details = {}
+pymdownx.emoji.emoji_generator = "zensical.extensions.emoji.to_svg"
+pymdownx.emoji.emoji_index = "zensical.extensions.emoji.twemoji"
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.magiclink = {}
+pymdownx.mark = {}
+pymdownx.smartsymbols = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true
+pymdownx.tilde = {}

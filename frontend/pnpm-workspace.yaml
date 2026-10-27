@@ -1,0 +1,4 @@
+# pnpm 白名单：允许执行构建脚本的依赖（pnpm 10+ 默认拦截，11+ 配置移到本文件）
+allowBuilds:
+  esbuild: true
+  sharp: true

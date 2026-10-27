@@ -1,0 +1,251 @@
+name: Docker-Release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag'
+        required: false
+        default: ''
+
+env:
+  GHCR_SLUG: ghcr.io/${{ github.repository }}
+  image_org: 'jetsung'
+  acr_registry: registry.cn-guangzhou.aliyuncs.com
+  tcr_registry: sgccr.ccs.tencentyun.com
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            tag_suffix: amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag_suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      package_name: ${{ steps.get_package_name.outputs.package_name }}
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set package name
+        id: get_package_name
+        run: |
+          PACKAGE_NAME="$(basename ${{ github.repository }})"
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_ENV
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            version=${{ github.ref_name }}
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.version }}" ]]; then
+            version=${{ github.event.inputs.version }}
+          else
+            version=latest-$(date +%Y%m%d)
+          fi
+          # 去掉 v 前缀，与 Cargo.toml 版本号保持一致风格
+          echo "version=${version#v}" >> $GITHUB_OUTPUT
+
+      - name: Login to GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.GHCR_SLUG }}:${{ steps.get_version.outputs.version }}-${{ matrix.tag_suffix }}
+          provenance: false
+          sbom: false
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create --tag ${{ env.GHCR_SLUG }}:${{ needs.build.outputs.version }} \
+            ${{ env.GHCR_SLUG }}:${{ needs.build.outputs.version }}-amd64 \
+            ${{ env.GHCR_SLUG }}:${{ needs.build.outputs.version }}-arm64
+          docker buildx imagetools create --tag ${{ env.GHCR_SLUG }}:latest \
+            ${{ env.GHCR_SLUG }}:${{ needs.build.outputs.version }}-amd64 \
+            ${{ env.GHCR_SLUG }}:${{ needs.build.outputs.version }}-arm64
+        shell: bash
+
+      - name: Delete old package versions
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package-name: ${{ needs.build.outputs.package_name }}
+          delete-untagged: true
+          keep-n-tagged: 10
+
+  # 可选：同步镜像到 Docker Hub（配置 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 后启用）
+  sync-to-dockerhub:
+    needs: [build, manifest]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Check Docker Hub credentials
+        id: check_dockerhub
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "Docker Hub credentials not configured, skipping..."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Skopeo
+        if: steps.check_dockerhub.outputs.skip != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: Login to ghcr.io
+        if: steps.check_dockerhub.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: steps.check_dockerhub.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Sync image to Docker Hub
+        if: steps.check_dockerhub.outputs.skip != 'true'
+        env:
+          SRC_IMAGE: docker://ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+          DEST_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.build.outputs.package_name }}
+          DEST_TAG: ${{ needs.build.outputs.version }}
+        run: |
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:$DEST_TAG
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:latest
+        shell: bash
+
+  # 可选：同步镜像到阿里云 ACR（配置 ALIYUN_USERNAME / ALIYUN_TOKEN 后启用）
+  sync-to-aliyun:
+    needs: [build, manifest]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Check Aliyun credentials
+        id: check_aliyun
+        run: |
+          if [ -z "${{ secrets.ALIYUN_USERNAME }}" ] || [ -z "${{ secrets.ALIYUN_TOKEN }}" ]; then
+            echo "Aliyun credentials not configured, skipping..."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Skopeo
+        if: steps.check_aliyun.outputs.skip != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: Login to ghcr.io
+        if: steps.check_aliyun.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Aliyun ACR
+        if: steps.check_aliyun.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.acr_registry }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_TOKEN }}
+
+      - name: Sync image to Aliyun ACR
+        if: steps.check_aliyun.outputs.skip != 'true'
+        env:
+          SRC_IMAGE: docker://ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+          DEST_REPO: ${{ env.acr_registry }}/${{ env.image_org }}/${{ needs.build.outputs.package_name }}
+          DEST_TAG: ${{ needs.build.outputs.version }}
+        run: |
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:$DEST_TAG
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:latest
+        shell: bash
+
+  # 可选：同步镜像到腾讯云 TCR（配置 TENCENT_USERNAME / TENCENT_TOKEN 后启用）
+  sync-to-tencent:
+    needs: [build, manifest]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Check Tencent credentials
+        id: check_tencent
+        run: |
+          if [ -z "${{ secrets.TENCENT_USERNAME }}" ] || [ -z "${{ secrets.TENCENT_TOKEN }}" ]; then
+            echo "Tencent credentials not configured, skipping..."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Skopeo
+        if: steps.check_tencent.outputs.skip != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: Login to ghcr.io
+        if: steps.check_tencent.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Tencent TCR
+        if: steps.check_tencent.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.tcr_registry }}
+          username: ${{ secrets.TENCENT_USERNAME }}
+          password: ${{ secrets.TENCENT_TOKEN }}
+
+      - name: Sync image to Tencent TCR
+        if: steps.check_tencent.outputs.skip != 'true'
+        env:
+          SRC_IMAGE: docker://ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+          DEST_REPO: ${{ env.tcr_registry }}/${{ env.image_org }}/${{ needs.build.outputs.package_name }}
+          DEST_TAG: ${{ needs.build.outputs.version }}
+        run: |
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:$DEST_TAG
+          skopeo copy --all $SRC_IMAGE docker://$DEST_REPO:latest
+        shell: bash

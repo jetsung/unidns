@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev*]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 前端与后端相互独立，各自成为一个 job 以便并行：前端失败不该等 Rust 编译完。
+  frontend:
+    name: 前端（构建）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      # 版本与 frontend/package.json 的 `packageManager` 保持一致；这里显式写死，
+      # 是因为 pnpm/action-setup 默认只在仓库根找 package.json，而根目录没有。
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 生产构建
+        run: pnpm build
+
+  # rust-embed 在编译期读取 frontend/dist，因此任何 cargo job 都要先构建前端。
+  # 该步骤抽为可复用说明：lint 与 test 各自内联同一组步骤，避免跨 job artifact 传输。
+  lint:
+    name: 格式与静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 安装 pnpm 并构建前端（rust-embed 编译期依赖 frontend/dist）
+        uses: ./.github/actions/build-frontend
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 检查代码格式
+        run: cargo fmt --all -- --check
+
+      - name: Clippy（拒绝任何警告）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: 全量测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 pnpm 并构建前端（rust-embed 编译期依赖 frontend/dist）
+        uses: ./.github/actions/build-frontend
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 运行全部测试（SQLite）
+        run: cargo test --workspace

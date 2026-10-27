@@ -1,0 +1,23 @@
+# 构建产物与本地数据不进上下文：前者巨大，后者含凭据密钥与数据库。
+# frontend/dist 由 Dockerfile 内的 frontend-builder 阶段重新生成，
+# 避免把本地（可能过期）的产物带进镜像。
+target/
+data/
+*.db
+*.db-shm
+*.db-wal
+frontend/node_modules/
+frontend/dist/
+
+# Git 与编辑器/系统文件
+.git/
+.vscode/
+.idea/
+.DS_Store
+
+# mise 开发环境配置不进 Docker 构建：Dockerfile 有自己的镜像源处理
+mise.toml
+mise.lock
+
+# OpenSpec 规划工件不进运行时镜像
+openspec/

@@ -1,0 +1,163 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+      - dev*
+    paths:
+      - 'docs/**'
+      - 'zensical.toml'
+      - '.github/workflows/docs.yml'
+
+  workflow_dispatch:
+
+# 同一分支仅保留最新一次文档部署，避免旧 run 覆盖新内容
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  # 从 github.com/<owner>/<repo> 提取短名，如 jetsung/unidns → unidns
+  REPO: ${{ github.event.repository.name }}
+
+jobs:
+  ### 构建站点（各发布渠道共同依赖）
+  build-docs:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Install zensical
+        run: pip install zensical
+
+      - name: Build site
+        run: zensical build --clean
+
+      - name: Pack site
+        run: tar -czf docs-site.tar.gz -C site .
+
+      - name: Upload docs site artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-site
+          path: docs-site.tar.gz
+          retention-days: 1
+
+  ### GitHub Pages
+  publish-pages:
+    name: Deploy · gh-pages branch
+    needs: [build-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download docs site
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-site
+          path: artifact/
+
+      - name: Unpack docs site
+        run: |
+          mkdir -p site
+          tar -xzf artifact/docs-site.tar.gz -C site
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          cname: ${{ vars.PAGES_DOMAIN }}
+
+  ### SSH Server WEB
+  publish-ssh:
+    name: Deploy · SSH
+    needs: [build-docs]
+    if: ${{ vars.ENABLE_SSH_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download docs site
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-site
+          path: artifact/
+
+      - name: Unpack docs site
+        run: |
+          mkdir -p site
+          tar -xzf artifact/docs-site.tar.gz -C site
+
+      - name: Set up SSH
+        uses: LuisEnMarroquin/setup-ssh-action@v3.0.0
+        with:
+          ORIGIN: ${{ secrets.SSH_HOSTNAME }}
+          SSHKEY: ${{ secrets.SSH_KEY }}
+          NAME: webserver
+          PORT: ${{ secrets.SSH_PORT }}
+          USER: ${{ secrets.SSH_USERNAME }}
+
+      - name: Deploy the website
+        env:
+          WEBROOT: /data/wwwroot/${{ env.REPO }}
+        run: |
+          # setup-ssh-action 生成的 known_hosts/access 需补一空行，避免 scp 误判
+          echo "" >> ~/.ssh/access
+          ssh webserver "rm -rf $WEBROOT && mkdir -p $WEBROOT"
+          scp -r site/* "webserver:$WEBROOT"
+
+  ### EdgeOne Pages
+  publish-edgeone:
+    name: Deploy · EdgeOne
+    needs: [build-docs]
+    runs-on: ubuntu-latest
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+    steps:
+      # jobs.<job_id>.if 不可用 secrets，改为在 step 内判断再门控后续步骤
+      - name: Check EdgeOne token
+        id: cred
+        run: |
+          if [ -n "$EDGEONE_API_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EDGEONE_API_TOKEN not set, skip EdgeOne deploy"
+          fi
+
+      - name: Download docs site
+        if: steps.cred.outputs.present == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-site
+          path: artifact/
+
+      - name: Unpack docs site
+        if: steps.cred.outputs.present == 'true'
+        run: |
+          mkdir -p site
+          tar -xzf artifact/docs-site.tar.gz -C site
+
+      - name: Set up Node.js
+        if: steps.cred.outputs.present == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install EdgeOne CLI
+        if: steps.cred.outputs.present == 'true'
+        run: npm install -g edgeone
+
+      - name: Deploy to EdgeOne Pages
+        if: steps.cred.outputs.present == 'true'
+        run: edgeone makers deploy ./site --name "${{ env.REPO }}" --site global --area overseas --token "${{ env.EDGEONE_API_TOKEN }}"

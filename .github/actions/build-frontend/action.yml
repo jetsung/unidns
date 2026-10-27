@@ -1,0 +1,29 @@
+# 复用步骤：构建前端产物。rust-embed 在编译期读取 frontend/dist，
+# 任何 cargo（build/test/clippy）job 都必须先执行本 action。
+name: build-frontend
+description: 安装 pnpm + Node，构建 frontend/dist（rust-embed 编译期依赖）
+runs:
+  using: composite
+  steps:
+    # 版本与 frontend/package.json 的 `packageManager` 保持一致；这里显式写死，
+    # 是因为 pnpm/action-setup 默认只在仓库根找 package.json，而根目录没有。
+    - name: 安装 pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 12.14.0
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: "24"
+        cache: pnpm
+        cache-dependency-path: frontend/pnpm-lock.yaml
+
+    - name: 安装依赖
+      shell: bash
+      working-directory: frontend
+      run: pnpm install --frozen-lockfile
+
+    - name: 生产构建
+      shell: bash
+      working-directory: frontend
+      run: pnpm build

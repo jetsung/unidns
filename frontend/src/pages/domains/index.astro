@@ -1,0 +1,182 @@
+---
+import AppLayout from '../../components/AppLayout.astro';
+---
+
+<AppLayout title="域名" active="domains">
+  <script>
+    import { api, esc, fmtTime, toast, requireAuth, zoneStatusBadge, modalFrame, busy, pager, bindPager } from '../../lib/app.js';
+
+    // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
+    document.addEventListener('astro:page-load', () => {
+      if (location.pathname !== '/domains') return;
+      init();
+    });
+
+    const PROVIDER_LABELS = {
+      aliyun: '阿里云',
+      dnspod: '腾讯云 DNSPod（国内站）',
+      dnspod_intl: '腾讯云 DNSPod（国际站）',
+      edgeone: 'EdgeOne（国内站）',
+      edgeone_intl: 'EdgeOne（国际站）',
+      cloudflare: 'CloudFlare',
+    };
+
+    let app;
+    const state = { keyword: '', provider: '', sort: { key: null, dir: 1 }, page: 1, page_size: 10 };
+    async function init() {
+      await requireAuth();
+      app = document.getElementById('app');
+      const params = new URLSearchParams(location.search);
+      state.keyword = params.get('keyword') || '';
+      state.provider = params.get('provider') || '';
+      await render();
+    }
+
+    async function render() {
+      const q = new URLSearchParams();
+      if (state.keyword) q.set('keyword', state.keyword);
+      if (state.provider) q.set('provider', state.provider);
+      q.set('page', state.page);
+      q.set('page_size', state.page_size);
+      const { total, page, page_size, items } = await api('/api/v1/domains' + (q.toString() ? `?${q}` : ''));
+
+      // 状态列排序权重：正常 < 待生效 < 已暂停 < 未知
+      function statusRank(s) {
+        const v = String(s || '').trim().toLowerCase();
+        if (['active', 'enable', 'enabled'].includes(v)) return 0;
+        if (v === 'pending') return 1;
+        if (['pause', 'paused', 'disable', 'disabled'].includes(v)) return 2;
+        return 3;
+      }
+      const SORTERS = {
+        status: (a, b) => statusRank(a.status) - statusRank(b.status),
+        record_count: (a, b) => a.record_count - b.record_count,
+        remark: (a, b) => (a.remark || '').localeCompare(b.remark || '', 'zh'),
+        synced_at: (a, b) => String(a.synced_at || '').localeCompare(String(b.synced_at || '')),
+      };
+      const sorted = [...items];
+      if (state.sort.key && SORTERS[state.sort.key]) {
+        const cmp = SORTERS[state.sort.key];
+        sorted.sort((a, b) => cmp(a, b) * state.sort.dir);
+      }
+      const rows = sorted.map((d) => `
+                <tr>
+                  <td><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a></td>
+                  <td><span class="badge provider">${esc(PROVIDER_LABELS[d.provider_type] || d.provider_type)}</span></td>
+                  <td>${esc(d.account_name)}</td>
+                  <td>${d.record_count}</td>
+                  <td>${zoneStatusBadge(d.status)}</td>
+                  <td class="muted">${d.remark ? esc(d.remark) : '—'}</td>
+                  <td class="muted">${esc(fmtTime(d.synced_at))}</td>
+                  <td class="actions">
+                    <a class="link-op" href="/domains/detail?id=${d.id}">解析</a>
+                    <a class="link-op" href="javascript:void(0)" data-remark="${d.id}" data-name="${esc(d.name)}" data-remark-val="${esc(d.remark || '')}">备注</a>
+                  </td>
+                </tr>`).join('');
+
+      const arrow = (key) => state.sort.key !== key ? '' : (state.sort.dir === 1 ? ' ↑' : ' ↓');
+      const sortTh = (key, label) =>
+        `<th class="th-sort" data-sort="${key}" title="点击排序">${label}<span class="sort-arrow">${arrow(key)}</span></th>`;
+      const tableHtml = items.length === 0
+        ? `<div class="empty"><div class="icon">🌐</div><div class="title">没有域名</div><div>请先在「平台账户」添加账户并执行同步</div></div>`
+        : `<table>
+            <thead><tr><th>域名</th><th>所属平台</th><th>账户</th>${sortTh('record_count', '记录数')}${sortTh('status', '状态')}${sortTh('remark', '备注')}${sortTh('synced_at', '同步时间')}<th>操作</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+
+      app.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>域名</h1>
+            <div class="desc">所有平台已同步的域名统一视图，点击进入管理解析记录</div>
+          </div>
+          <div class="grow"></div>
+          <div class="head-actions">
+            <button class="btn" id="sync-all-btn">全量同步</button>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <input id="f-keyword" placeholder="按域名关键字过滤" value="${esc(state.keyword)}" style="width:240px" />
+          <select id="f-provider" style="min-width:180px">
+            <option value="">全部平台</option>
+            ${Object.entries(PROVIDER_LABELS).map(([k, v]) =>
+              `<option value="${k}" ${state.provider === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+          </select>
+          <button class="btn" id="f-apply">筛选</button>
+          <span class="count">共 ${total} 个域名</span>
+        </div>
+        <div class="card card-table">${tableHtml}</div>
+        ${pager({ total, page, page_size })}`;
+
+      bindPager((p) => { state.page = p; render(); }, (s) => { state.page_size = s; state.page = 1; render(); });
+
+      document.getElementById('f-apply').addEventListener('click', applyFilter);
+      document.getElementById('f-keyword').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFilter(); });
+      // 列排序：点击可排序表头，再点切换方向，第三次取消排序
+      document.querySelectorAll('th.th-sort').forEach((th) => {
+        th.addEventListener('click', () => {
+          const key = th.dataset.sort;
+          state.page = 1;
+          if (state.sort.key !== key) state.sort = { key, dir: 1 };
+          else if (state.sort.dir === 1) state.sort.dir = -1;
+          else state.sort = { key: null, dir: 1 };
+          render();
+        });
+      });
+      document.querySelectorAll('a[data-remark]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          openRemarkModal(el.dataset.remark, el.dataset.name, el.dataset.remarkVal || '');
+        });
+      });
+      document.getElementById('sync-all-btn').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await api('/api/v1/sync', { method: 'POST' });
+          toast(`后台同步已开始（${r.started.length} 个账户）`, 'ok');
+          await Promise.all(r.started.map((s) =>
+            pollRun(s.run_id, (res) => {
+              const msg = res.status === 'success'
+                ? `${s.account_name} 同步完成：${res.stats?.records ?? '—'} 条记录${res.error ? `（${res.error}）` : ''}`
+                : `${s.account_name} 同步失败：${res.error || '未知原因'}`;
+              toast(msg, res.status === 'success' ? 'ok' : 'err');
+            }).catch((err) => toast(`${s.account_name}: ${err.message}`, 'err'))
+          ));
+          render();
+        } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+      });
+    }
+
+    function applyFilter() {
+      const q = new URLSearchParams();
+      const kw = document.getElementById('f-keyword').value.trim();
+      const pv = document.getElementById('f-provider').value;
+      if (kw) q.set('keyword', kw);
+      if (pv) q.set('provider', pv);
+      const qs = q.toString();
+      state.keyword = kw; state.provider = pv;
+      state.page = 1;
+      history.replaceState(null, '', '/domains' + (qs ? `?${qs}` : ''));
+      render().catch((err) => toast(err.message, 'err'));
+    }
+
+    // 备注弹窗：编辑域名本地备注（不回写平台）
+    function openRemarkModal(domainId, name, remark) {
+      const mask = modalFrame(`备注 · ${esc(name)}`, `
+        <textarea id="remark-input" class="input" rows="4" maxlength="500"
+          placeholder="填写该域名的备注（仅保存在 UniDNS 本地）">${esc(remark)}</textarea>
+      `, `<button class="btn" data-close>取消</button><button class="btn primary" id="remark-save">保存</button>`);
+      mask.querySelector('#remark-save').addEventListener('click', async () => {
+        const value = mask.querySelector('#remark-input').value.trim();
+        await busy(mask.querySelector('#remark-save'), async () => {
+          try {
+            await api(`/api/v1/domains/${domainId}`, { method: 'PATCH', body: { remark: value } });
+            toast('备注已保存', 'ok');
+            mask.remove();
+            render();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+    }
+  </script>
+</AppLayout>

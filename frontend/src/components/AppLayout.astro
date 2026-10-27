@@ -1,0 +1,78 @@
+---
+// 应用主布局：深色侧边栏 + 浅色内容区（ClientRouter 软导航，避免整页刷新白屏）
+import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
+
+interface Props {
+  title: string;
+  active?: string;
+}
+
+const { title, active = '' } = Astro.props;
+const current = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · UniDNS</title>
+    <ClientRouter />
+  </head>
+  <body>
+    <div class="app-shell" id="app-shell" data-page={active} style="visibility:hidden">
+      <aside class="sidebar">
+        <a class="brand" href="/accounts" title="回到首页"><span class="brand-mark">U</span><span class="brand-name">UniDNS</span></a>
+        <nav>
+          <a href="/accounts" class={active === 'accounts' ? 'active' : ''} title="平台账户">
+            <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg>
+            <span class="nav-full">平台账户</span><span class="nav-short">平台</span>
+          </a>
+          <a href="/domains" class={active === 'domains' ? 'active' : ''} title="域名">
+            <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 4 5.7 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.7-4-9s1.5-6.4 4-9z"/></svg>
+            <span class="nav-full">域名</span><span class="nav-short">域名</span>
+          </a>
+        </nav>
+        <div class="spacer"></div>
+        <div class="side-footer">
+          <button class="btn ghost small" id="logout-btn" style="color:#9ca3af">登出</button>
+        </div>
+        <button class="sidebar-toggle" id="sidebar-toggle" title="折叠/展开侧边栏">
+          <svg class="ico-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          <svg class="ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </aside>
+      <main class="content" id="app">
+        <div class="loading">加载中…</div>
+      </main>
+    </div>
+    <script>
+      import { logout } from '../lib/app.js';
+
+      // 软导航：模块只执行一次，监听 astro:page-load 在每次换页后重挂事件
+      document.addEventListener('astro:page-load', () => {
+        document.getElementById('logout-btn')?.addEventListener('click', logout);
+
+        // 侧边栏折叠：localStorage 记忆，仅桌面端生效；箭头方向由 collapsed 类驱动
+        const shell = document.getElementById('app-shell');
+        const toggle = document.getElementById('sidebar-toggle');
+        if (shell && toggle && !toggle.dataset.bound) {
+          toggle.dataset.bound = '1';
+          const mq = window.matchMedia('(max-width: 768px)');
+          const apply = () => {
+            if (mq.matches) { shell.classList.remove('collapsed'); return; }
+            shell.classList.toggle('collapsed', localStorage.getItem('unidns.sidebar.collapsed') === '1');
+          };
+          apply();
+          mq.addEventListener('change', apply);
+          toggle.addEventListener('click', () => {
+            const collapsed = shell.classList.toggle('collapsed');
+            localStorage.setItem('unidns.sidebar.collapsed', collapsed ? '1' : '0');
+          });
+        }
+      });
+    </script>
+    <slot />
+  </body>
+</html>

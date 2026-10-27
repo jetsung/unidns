@@ -1,0 +1,77 @@
+# 提交前预处理（prek：Rust 重写的 pre-commit，原生 TOML 配置，也兼容 .pre-commit-config.yaml）。
+#
+# 用法（prek 由 mise.toml 的 [tools] 通过 aqua 后端安装，不需要 pip/pipx 安装）：
+#   prek install                      # 按 default_install_hook_types 写入 .git/hooks/
+#   prek run cargo-clippy --all-files --stage pre-commit   # 单独跑某个（含其他阶段的）钩子
+#   prek uninstall                    # 移除钩子
+#:schema https://www.schemastore.org/prek.json
+
+# 与 mise.toml 中 aqua:j178/prek 提供的版本对齐，避免各人行为不一致。
+minimum_prek_version = "0.5.0"
+
+# 所有检查都在提交前触发：clippy 与单元测试也放在 pre-commit，避免问题流入推送。
+default_install_hook_types = ["pre-commit"]
+
+# 生成物与依赖目录不参与检查（.gitignore 命中的文件 prek 会跳过，这里显式兜底）。
+exclude = { glob = [
+    "target/**",
+    "frontend/node_modules/**",
+    "frontend/dist/**",
+] }
+
+# 1) 文件卫生：prek 的 Rust 内置实现，离线可用、不需要额外环境。
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    # rustfmt.toml 的 newline_style = "unix"
+    { id = "mixed-line-ending", args = ["--fix=lf"] },
+    # pnpm-lock.yaml 是多文档 YAML 生成文件，check-yaml 不适用
+    { id = "check-yaml", exclude = { glob = "frontend/pnpm-lock.yaml" } },
+    { id = "check-toml" },
+    { id = "check-json" },
+    { id = "check-merge-conflict" },
+    { id = "check-added-large-files" },
+    { id = "detect-private-key" },
+]
+
+# 2) Rust：本地 pre-commit 阶段直接**自动格式化**（不 --check，改了直接落盘），
+#    CI 仍用 `cargo fmt --check` 做只读校验兜底；clippy 参数与 CI 的 lint job
+#    （.github/workflows/ci.yml）逐字对齐，避免本地通过、CI 失败这种分歧。
+#    language = "system" 表示直接用 devShell 里的 cargo。
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt"
+args = ["--all"]
+files = "\\.rs$"
+pass_filenames = false
+stages = ["pre-commit"]
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy -D warnings"
+language = "system"
+entry = "cargo clippy"
+args = ["--workspace", "--all-targets", "--", "-D", "warnings"]
+files = "\\.rs$"
+pass_filenames = false
+stages = ["pre-commit"]
+
+# 测试也在提交前跑：只跑 --lib 单元测试（快、无需外部环境）；
+# 4 个 ignored 用例需要真实平台凭据（ALIYUN_*/DNSPOD_*/CLOUDFLARE_* 等环境变量），
+# 属手动冒烟，不进钩子。要跑全量可自行执行 cargo test --workspace。
+[[repos.hooks]]
+id = "cargo-test"
+name = "cargo test（单元测试）"
+language = "system"
+entry = "cargo test"
+args = ["--lib"]
+files = "\\.rs$"
+pass_filenames = false
+stages = ["pre-commit"]

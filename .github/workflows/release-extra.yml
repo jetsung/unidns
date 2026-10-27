@@ -1,0 +1,95 @@
+# loongarch64 / riscv64 没有 GitHub hosted runner，只能用 cargo-zigbuild 在
+# x86_64 runner 上交叉。这两个架构的产物属于补充资产，单独放在这里以保持
+# release.yml 干净：release.yml 通过 workflow_call 以同级 job 的形式调用本文件，
+# 产物回传给主流程的 create-release 统一发布。
+#
+# 由 release.yml 的 build-extra job 在 workflow_call 时传入 tag/version；
+# 关闭开关（repo variable BUILD_EXTRA != true）时该 job 被跳过，本文件不执行。
+name: Release Extra
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: '解析出的 tag（如 v1.0.0），与主流程 extract-version 一致'
+        required: false
+        type: string
+      version:
+        description: '解析出的版本号（如 1.0.0）'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_DIR: dist
+  BIN: unidns
+  RUSTFLAGS: -C strip=symbols
+
+jobs:
+  # 交叉编译：同架构 runner 上的真实构建在这里不可得，musl 与 gnu 都走 zigbuild。
+  # 注意 riscv64 用带 ABI 后缀的 riscv64gc；loongarch64 / riscv64 上 ring
+  # （reqwest 的 rustls 后端依赖）支持尚不完整，若失败需要先确认上游状态。
+  build-others:
+    name: Linux ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: loongarch64-gnu
+            target: loongarch64-unknown-linux-gnu
+          - label: loongarch64-musl
+            target: loongarch64-unknown-linux-musl
+          - label: riscv64-gnu
+            target: riscv64gc-unknown-linux-gnu
+          - label: riscv64-musl
+            target: riscv64gc-unknown-linux-musl
+    env:
+      VERSION: ${{ inputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+
+      # rust-embed 在编译期嵌入 frontend/dist，交叉编译同样要先构建前端
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Install zig
+        uses: jetsung/setup-zig@v0
+
+      - name: Install cargo-zigbuild
+        run: cargo install --locked cargo-zigbuild
+
+      - name: Add target
+        run: rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: extra-${{ matrix.label }}
+
+      - name: Build
+        run: cargo-zigbuild zigbuild --locked --release -p "$BIN" --target "$TARGET"
+
+      - name: Package
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          tar -cJf "$RELEASE_DIR/$BIN-v$VERSION-$TARGET.tar.xz" \
+            -C "target/$TARGET/release" "$BIN"
+          ls -lh "$RELEASE_DIR"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-extra-${{ matrix.label }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1

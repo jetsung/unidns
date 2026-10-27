@@ -1,0 +1,306 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # glob 里 [0-9]* 会连同后缀一起匹配上，所以正式版模式实际也命中 -alpha 等；
+      # 用排除把非发布后缀挡掉，ignore 优先级高于 include
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - 'v[0-9]*.[0-9]*.[0-9]*-beta*'
+      - 'v[0-9]*.[0-9]*.[0-9]*-rc*'
+      - '!v[0-9]*.[0-9]*.[0-9]*-alpha*'
+      - '!v[0-9]*.[0-9]*.[0-9]*-preview*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '要补发资产的已有 tag（如 v1.0.0），留空则只构建产物、不发 Release'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_DIR: dist
+  BIN: unidns
+  # 发布产物只取符号表以外的部分，体积可降一个数量级
+  RUSTFLAGS: -C strip=symbols
+
+jobs:
+  # 标签可能来自 workflow_dispatch，故版本号在这里统一解析后由各 job 复用；
+  # checkout 的 ref 留空时 actions 会回落到当前触发引用。
+  extract-version:
+    name: 解析版本号
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.ver.outputs.TAG }}
+      version: ${{ steps.ver.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extract tag and version
+        id: ver
+        env:
+          # workflow_dispatch 的输入属于外部数据，必须经 env 传入，不能直接插进脚本
+          INPUT_TAG: ${{ inputs.tag_name }}
+        run: |
+          tag="$INPUT_TAG"
+          [[ -z "$tag" && "$GITHUB_REF" == refs/tags/* ]] && tag="${GITHUB_REF#refs/tags/}"
+          # 只接受 vX.Y.Z / vX.Y.Z-beta* / vX.Y.Z-rc*，后续 job 会把它当作 checkout 的 ref 使用
+          if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)[0-9A-Za-z.+-]*)?$ ]]; then
+            echo "::error::不符合 vX.Y.Z / vX.Y.Z-beta* / vX.Y.Z-rc* 的 tag：$tag"
+            exit 1
+          fi
+          if [[ -n "$tag" ]]; then
+            version="${tag#v}"
+          else
+            version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.+-]+)?$ ]]; then
+            echo "::error::解析出的版本号非法：$version"
+            exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag version=$version"
+  # 补充构建：loongarch64 / riscv64 用 cargo-zigbuild 在 x86_64 runner 交叉编译。
+  # 代码放在独立的 release-extra.yml，以 workflow_call 外挂形式调用，保持本文件干净；
+  # 产物自动回传到本 run，由 create-release 统一打包发布。
+  # 开关：GitHub repo variable BUILD_EXTRA=true 时才触发（默认不触发，跳过）。
+  # 「skipped 不应阻塞 create-release」靠 needs 的 if 条件保证（见 create-release）。
+  build-extra:
+    name: 补充构建（loongarch64 / riscv64）
+    needs: [extract-version]
+    if: ${{ vars.BUILD_EXTRA == 'true' }}
+    uses: ./.github/workflows/release-extra.yml
+    with:
+      tag: ${{ needs.extract-version.outputs.tag }}
+      version: ${{ needs.extract-version.outputs.version }}
+
+  # 每种架构都在同架构的真实 runner 上原生编译（x86_64 → ubuntu-24.04，
+  # aarch64 → ubuntu-24.04-arm），因此不需要交叉工具链：musl 只缺 libc 与
+  # 链接器驱动，由 musl-tools 补齐。
+  # loongarch64 / riscv64 没有 hosted runner，拆到 release-extra.yml 用 zig 交叉。
+  build-linux:
+    name: Linux ${{ matrix.label }}
+    needs: [extract-version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x86_64-gnu
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - label: x86_64-musl
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - label: aarch64-gnu
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - label: aarch64-musl
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      # tag 为空（dispatch 未填）时回落到当前提交，避免把空 ref 交给 checkout
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.extract-version.outputs.tag || github.sha }}
+
+      # rust-embed 在编译期嵌入 frontend/dist，交叉编译同样要先构建前端
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Add target
+        run: rustup target add "$TARGET"
+
+      # 只在 musl 腿安装：提供 musl-gcc 与 musl libc 头文件
+      - name: Install musl tools
+        if: ${{ endsWith(matrix.target, '-musl') }}
+        run: |
+          sudo apt update
+          sudo apt install -y musl-tools musl-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-${{ matrix.label }}
+
+      - name: Build
+        run: cargo build --locked --release -p "$BIN" --target "$TARGET"
+
+      - name: Package
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          tar -cJf "$RELEASE_DIR/$BIN-v$VERSION-$TARGET.tar.xz" \
+            -C "target/$TARGET/release" "$BIN"
+          ls -lh "$RELEASE_DIR"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-linux-${{ matrix.label }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1
+
+  # Apple 两种架构各自有真实 runner：x86_64 用 macos-26-intel，aarch64 用 macos-26；
+  # 原生工具链同架构编译，无需 zig
+  build-macos:
+    name: macOS ${{ matrix.arch }}
+    needs: [extract-version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: macos-26-intel
+            target: x86_64-apple-darwin
+          - arch: aarch64
+            os: macos-26
+            target: aarch64-apple-darwin
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.extract-version.outputs.tag || github.sha }}
+
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Add target
+        run: rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ matrix.arch }}
+
+      - name: Build
+        run: cargo build --locked --release -p "$BIN" --target "$TARGET"
+
+      - name: Package
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          tar -cJf "$RELEASE_DIR/$BIN-v$VERSION-$TARGET.tar.xz" \
+            -C "target/$TARGET/release" "$BIN"
+          ls -lh "$RELEASE_DIR"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-macos-${{ matrix.arch }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1
+  # Windows 两种架构各自有真实 runner：x86_64 用 windows-2025，aarch64 用
+  # windows-11-arm；原生 MSVC 工具链同架构编译，无需交叉。
+  # 打包用 PowerShell 内置 Compress-Archive，不依赖外部 zip 工具，
+  # x86_64 / aarch64 两条腿步骤完全一致。
+  build-windows:
+    name: Windows ${{ matrix.arch }}
+    needs: [extract-version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - arch: aarch64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.extract-version.outputs.tag || github.sha }}
+
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        shell: bash
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Add target
+        shell: bash
+        run: rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-${{ matrix.arch }}
+
+      - name: Build
+        shell: bash
+        run: cargo build --locked --release -p "$BIN" --target "$TARGET"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RELEASE_DIR" | Out-Null
+          Compress-Archive -Path "target/$env:TARGET/release/$env:BIN.exe" `
+            -DestinationPath "$env:RELEASE_DIR/$env:BIN-v$env:VERSION-$env:TARGET.zip" -Force
+          Get-ChildItem -Path "$env:RELEASE_DIR" | Format-Table Name, Length
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-windows-${{ matrix.arch }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1
+
+  create-release:
+    name: 发布 GitHub Release
+    needs: [extract-version, build-linux, build-macos, build-windows, build-extra]
+    # build-extra 被 vars.BUILD_EXTRA 开关控制：关闭时 skipped，不应阻塞发布。
+    # always() 让本 job 即使在 build-extra skipped 时仍执行；再叠加 tag 非空、
+    # 以及 build-extra 未失败（skipped 或 success）的双重判断。
+    if: ${{ always() && needs.extract-version.outputs.tag != '' && !cancelled() && (needs.build-extra.result == 'success' || needs.build-extra.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: all-dist/
+          pattern: packages-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: all-dist
+        run: sha256sum ./* > SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.extract-version.outputs.tag }}
+          files: all-dist/*
+          generate_release_notes: true
+          # beta / rc 在 GitHub 上标记为 prerelease，正式版为 false
+          prerelease: ${{ contains(needs.extract-version.outputs.tag, '-beta') || contains(needs.extract-version.outputs.tag, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

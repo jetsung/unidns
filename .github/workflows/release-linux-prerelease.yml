@@ -1,0 +1,228 @@
+name: Build Test (Linux)
+
+# Linux 各架构的构建验证：alpha / preview 标签只跑到这里，用来确认
+# 「同架构真实 runner」与「zig 交叉」两类目标都能编译通过，不产出 Release。
+# 验证通过后再打 vX.Y.Z-rc* / -beta*（走 release.yml 出预发布包）或 vX.Y.Z（正式版）。
+# beta / rc / 正式版不在本文件的标签范围内，两条流水线互不干扰。
+on:
+  push:
+    tags:
+      - 'v*-alpha*'
+      - 'v*-preview*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '要复现验证的 alpha/preview tag（如 v0.1.0-alpha1），留空则用当前引用构建'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_DIR: dist
+  BIN: unidns
+  RUSTFLAGS: -C strip=symbols
+
+jobs:
+  extract-version:
+    name: 解析版本号
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.ver.outputs.TAG }}
+      version: ${{ steps.ver.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extract tag and version
+        id: ver
+        env:
+          # workflow_dispatch 的输入属于外部数据，必须经 env 传入，不能直接插进脚本
+          INPUT_TAG: ${{ inputs.tag_name }}
+        run: |
+          tag="$INPUT_TAG"
+          [[ -z "$tag" && "$GITHUB_REF" == refs/tags/* ]] && tag="${GITHUB_REF#refs/tags/}"
+          # 验证用标签：vX.Y.Z-(alpha|preview)[后缀]
+          if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]-(alpha|preview)[0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::不符合 vX.Y.Z-(alpha|preview)* 的验证 tag：$tag"
+            exit 1
+          fi
+          if [[ -n "$tag" ]]; then
+            version="${tag#v}"
+          else
+            version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.+-]+)?$ ]]; then
+            echo "::error::解析出的版本号非法：$version"
+            exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag version=$version"
+
+  # 与 release.yml 的主流程一致：同架构真实 runner 原生编译，musl 只补 musl-tools
+  build-linux:
+    name: Linux ${{ matrix.label }}
+    needs: [extract-version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x86_64-gnu
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - label: x86_64-musl
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - label: aarch64-gnu
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - label: aarch64-musl
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.extract-version.outputs.tag || github.sha }}
+
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Add target
+        run: rustup target add "$TARGET"
+
+      - name: Install musl tools
+        if: ${{ endsWith(matrix.target, '-musl') }}
+        run: |
+          sudo apt update
+          sudo apt install -y musl-tools musl-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: prereq-linux-${{ matrix.label }}
+
+      - name: Build
+        run: cargo build --locked --release -p "$BIN" --target "$TARGET"
+
+      # 产物可执行性自检：同架构 runner 上真的跑一次 `unidns version`
+      - name: Smoke test
+        run: |
+          "./target/$TARGET/release/$BIN" version
+          file "./target/$TARGET/release/$BIN"
+
+      - name: Package
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          tar -cJf "$RELEASE_DIR/$BIN-v$VERSION-$TARGET.tar.xz" \
+            -C "target/$TARGET/release" "$BIN"
+          ls -lh "$RELEASE_DIR"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-linux-${{ matrix.label }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1
+
+  # zig 交叉的架构：风险最高的一档（ring 对 loongarch64 / riscv64 的支持），
+  # 必须在这里先暴露问题，而不是等正式 tag
+  build-cross:
+    name: Cross ${{ matrix.label }}
+    needs: [extract-version]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: loongarch64-gnu
+            target: loongarch64-unknown-linux-gnu
+          - label: loongarch64-musl
+            target: loongarch64-unknown-linux-musl
+          - label: riscv64-gnu
+            target: riscv64gc-unknown-linux-gnu
+          - label: riscv64-musl
+            target: riscv64gc-unknown-linux-musl
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.extract-version.outputs.tag || github.sha }}
+
+      - name: 安装 pnpm 并构建前端
+        uses: ./.github/actions/build-frontend
+
+      - name: Update Rust
+        run: |
+          rustup update
+          rustc --version
+
+      - name: Install zig
+        uses: jetsung/setup-zig@v0
+
+      - name: Install cargo-zigbuild
+        run: cargo install --locked cargo-zigbuild
+
+      - name: Add target
+        run: rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: prereq-cross-${{ matrix.label }}
+
+      - name: Build
+        run: cargo-zigbuild zigbuild --locked --release -p "$BIN" --target "$TARGET"
+
+      - name: Verify binary
+        run: file "./target/$TARGET/release/$BIN"
+
+      - name: Package
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          tar -cJf "$RELEASE_DIR/$BIN-v$VERSION-$TARGET.tar.xz" \
+            -C "target/$TARGET/release" "$BIN"
+          ls -lh "$RELEASE_DIR"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-cross-${{ matrix.label }}
+          path: ${{ env.RELEASE_DIR }}/*
+          retention-days: 1
+
+  # 只做结论汇总：任何一条腿失败这里就红，产物留在 Actions artifacts 里供排查。
+  # 本流程不创建 Release —— 要出包请打 -rc* / -beta*（release.yml + release-extra.yml）
+  # 或正式 vX.Y.Z。
+  report:
+    name: 汇总架构构建结果
+    needs: [build-linux, build-cross]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Summarize
+        env:
+          RESULT_LINUX: ${{ needs.build-linux.result }}
+          RESULT_CROSS: ${{ needs.build-cross.result }}
+        run: |
+          echo "build-linux: $RESULT_LINUX"
+          echo "build-cross: $RESULT_CROSS"
+          if [[ "$RESULT_LINUX" != success || "$RESULT_CROSS" != success ]]; then
+            echo "::error::存在架构构建失败，先修工具链/依赖，不要打 rc/beta/正式标签"
+            exit 1
+          fi
+          echo "全部 Linux 架构构建通过"

@@ -1,0 +1,239 @@
+---
+import AppLayout from '../../components/AppLayout.astro';
+---
+
+<AppLayout title="解析记录" active="domains">
+  <script>
+    import { api, esc, toast, modal, modalFrame, requireAuth, PROVIDERS, RECORD_TYPES, busy, pollRun, pager, bindPager } from '../../lib/app.js';
+
+    // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
+    document.addEventListener('astro:page-load', () => {
+      if (location.pathname !== '/domains/detail') return;
+      init();
+    });
+
+    let app;
+    let domainId = 0;
+    const filter = { type: '', keyword: '', status: '', page: 1, page_size: 10 };
+    let domain = null;
+    async function init() {
+      await requireAuth();
+      app = document.getElementById('app');
+      const params = new URLSearchParams(location.search);
+      domainId = Number(params.get('id'));
+      filter.type = params.get('type') || '';
+      filter.keyword = params.get('keyword') || '';
+      filter.status = params.get('status') || '';
+      domain = null;
+      await load();
+    }
+
+    async function load() {
+      domain = await api(`/api/v1/domains/${domainId}`);
+      const q = new URLSearchParams();
+      if (filter.type) q.set('type', filter.type);
+      if (filter.keyword) q.set('keyword', filter.keyword);
+      if (filter.status) q.set('status', filter.status);
+      q.set('page', filter.page);
+      q.set('page_size', filter.page_size);
+      const data = await api(`/api/v1/domains/${domainId}/records?${q}`);
+      render(data);
+    }
+
+    function recordRow(r) {
+      const isCf = domain.provider_type === 'cloudflare';
+      const proxied = r.proxied != null ? (r.proxied ? ' <span class="badge provider" title="CloudFlare 代理已开启">代理中</span>' : '') : '';
+      const pending = r.pending_sync ? ' <span class="badge err" title="平台侧状态与本地不一致，下次同步将自动对齐">待同步</span>' : '';
+      return `
+        <tr>
+          <td class="mono" data-label="主机记录"><b>${esc(r.host)}</b></td>
+          <td data-label="类型"><span class="badge">${esc(r.rtype)}</span></td>
+          <td class="mono break-all" data-label="记录值">${esc(r.value)}${proxied}${r.remark ? `<div class="sub">📝 ${esc(r.remark)}</div>` : ''}</td>
+          <td class="mono" data-label="TTL">${r.ttl}</td>
+          <td class="muted" data-label="线路">${r.line ? esc(r.line) : '—'}</td>
+          <td data-label="状态">${r.status === 'enabled' ? '<span class="badge ok"><span class="dot"></span>启用</span>' : '<span class="badge warn"><span class="dot"></span>停用</span>'}${pending}</td>
+          <td class="actions" style="text-align:right">
+            <button class="btn small" data-ract="edit" data-rid="${r.id}">编辑</button>
+            <button class="btn small" data-ract="toggle" data-rid="${r.id}" data-host="${esc(r.host)}" data-target="${r.status === 'enabled' ? 'disabled' : 'enabled'}">${r.status === 'enabled' ? '停用' : '启用'}</button>
+            <button class="btn small danger" data-ract="delete" data-rid="${r.id}" data-host="${esc(r.host)}">删除</button>
+          </td>
+        </tr>`;
+    }
+
+    function render(data) {
+      const isCf = domain.provider_type === 'cloudflare';
+      app.innerHTML = `
+        <div class="breadcrumb"><a href="/domains">域名</a><span>/</span><span>${esc(domain.name)}</span></div>
+        <div class="page-head">
+          <div>
+            <h1>${esc(domain.name)}</h1>
+            <div class="desc" style="display:flex;gap:8px;align-items:center">
+              <span class="badge provider">${esc(domain.provider_name)}</span>
+              <span class="badge outline">${esc(domain.account_name)}</span>
+            </div>
+          </div>
+          <div class="grow"></div>
+          <div class="head-actions">
+            <button class="btn" id="resync-btn">重新同步</button>
+            <button class="btn primary" id="add-record-btn">＋ 添加记录</button>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <select id="f-type">
+            <option value="">全部类型</option>
+            ${RECORD_TYPES.map((t) => `<option value="${t}" ${filter.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+          <input id="f-keyword" placeholder="按主机记录过滤" value="${esc(filter.keyword)}" style="width:200px" />
+          <select id="f-status">
+            <option value="">全部状态</option>
+            <option value="enabled" ${filter.status === 'enabled' ? 'selected' : ''}>启用</option>
+            <option value="disabled" ${filter.status === 'disabled' ? 'selected' : ''}>停用</option>
+          </select>
+          <button class="btn" id="f-apply">筛选</button>
+          <span class="count">共 ${data.total} 条记录</span>
+        </div>
+        <div class="card card-table">
+          ${data.items.length === 0 ? `
+          <div class="empty"><div class="icon">📄</div><div class="title">没有匹配的解析记录</div><div>点击「添加记录」创建，或调整筛选条件</div></div>
+          ` : `
+          <table>
+            <thead><tr><th>主机记录</th><th>类型</th><th>记录值</th><th>TTL</th><th>线路</th><th>状态</th><th style="text-align:right">操作</th></tr></thead>
+            <tbody>
+              ${data.items.map(recordRow).join('')}
+            </tbody>
+          </table>`}
+        </div>
+        ${pager({ total: data.total, page: data.page, page_size: data.page_size })}
+        ${isCf ? '' : `<div class="sub" style="margin-top:10px">解析线路留空为平台默认线路</div>`}`;
+
+      bindPager(
+        (p) => { filter.page = p; load().catch((err) => toast(err.message, 'err')); },
+        (s) => { filter.page_size = s; filter.page = 1; load().catch((err) => toast(err.message, 'err')); }
+      );
+
+      const applyFilter = () => {
+        const q = new URLSearchParams();
+        const t = document.getElementById('f-type').value;
+        const kw = document.getElementById('f-keyword').value.trim();
+        const st = document.getElementById('f-status').value;
+        filter.type = t; filter.keyword = kw; filter.status = st;
+        filter.page = 1;
+        if (t) q.set('type', t);
+        if (kw) q.set('keyword', kw);
+        if (st) q.set('status', st);
+        const qs = q.toString();
+        history.replaceState(null, '', `/domains/detail?id=${domainId}` + (qs ? `&${qs}` : ''));
+        load().catch((err) => toast(err.message, 'err'));
+      };
+      document.getElementById('f-apply').addEventListener('click', applyFilter);
+      document.getElementById('f-keyword').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFilter(); });
+      document.getElementById('add-record-btn').addEventListener('click', () => showRecordForm());
+      document.getElementById('resync-btn').addEventListener('click', async (e) => {
+        await busy(e.target, async () => {
+          try {
+            const r = await api(`/api/v1/accounts/${domain.account_id}/sync`, { method: 'POST' });
+            toast('后台同步已开始，完成后会提示结果', 'ok');
+            await pollRun(r.run_id, (res) => {
+              const msg = res.status === 'success'
+                ? `同步完成：${res.stats?.domains ?? '—'} 个域名 / ${res.stats?.records ?? '—'} 条记录${res.error ? `（${res.error}）` : ''}`
+                : `同步失败：${res.error || '未知原因'}`;
+              toast(msg, res.status === 'success' ? 'ok' : 'err');
+            }).catch((err) => toast(err.message, 'err'));
+            load();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+      app.querySelectorAll('button[data-ract]').forEach((btn) => {
+        btn.addEventListener('click', () => recordAction(btn.dataset.ract, btn.dataset.rid, btn.dataset.host, btn.dataset.target));
+      });
+    }
+
+    function showRecordForm(existing) {
+      const isEdit = !!existing;
+      const f = isEdit ? existing : { host: '', rtype: 'A', value: '', ttl: 600, line: '', proxied: false };
+      const isCf = domain.provider_type === 'cloudflare';
+      const mask = modalFrame(isEdit ? `编辑记录 · ${esc(f.host)}` : '添加解析记录', `
+        <div class="field">
+          <label>主机记录</label>
+          <input name="host" required value="${esc(f.host)}" placeholder="子域名前缀，根记录填 @" />
+          <span class="hint">完整记录：&lt;主机记录&gt;.${esc(domain.name)}</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>类型</label>
+            <select name="rtype">
+              ${RECORD_TYPES.map((t) => `<option value="${t}" ${f.rtype === t ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>TTL（秒）</label>
+            <input type="number" name="ttl" min="1" max="86400" required value="${f.ttl}" />
+          </div>
+        </div>
+        <div class="field">
+          <label>记录值</label>
+          <input name="value" required value="${esc(f.value)}" placeholder="IP / CNAME 目标 / 文本" class="mono" />
+        </div>
+        ${isCf
+          ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-secondary)">
+               <input type="checkbox" name="proxied" style="height:auto;width:auto" ${f.proxied ? 'checked' : ''} /> 开启 CloudFlare 代理（proxied）</label>`
+          : `<div class="field"><label>解析线路</label><input name="line" value="${esc(f.line || '')}" placeholder="留空为默认线路" /></div>`}
+        ${domain.provider_type !== 'edgeone' && domain.provider_type !== 'edgeone_intl'
+          ? `<div class="field"><label>备注</label><input name="remark" value="${esc(f.remark || '')}" placeholder="选填；清空并保存可删除备注" /></div>`
+          : ''}
+      `, `
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="save-record">${isEdit ? '保存修改' : '创建并回写平台'}</button>
+      `);
+      mask.querySelector('#save-record').addEventListener('click', async (e) => {
+        await busy(e.target, async () => {
+          const body = {
+            host: mask.querySelector('[name="host"]').value.trim(),
+            rtype: mask.querySelector('[name="rtype"]').value,
+            value: mask.querySelector('[name="value"]').value.trim(),
+            ttl: Number(mask.querySelector('[name="ttl"]').value),
+          };
+          if (isCf) body.proxied = mask.querySelector('[name="proxied"]').checked;
+          else {
+            const line = mask.querySelector('[name="line"]').value.trim();
+            if (line) body.line = line;
+          }
+          const remarkInput = mask.querySelector('[name="remark"]');
+          if (remarkInput) body.remark = remarkInput.value.trim();
+          try {
+            if (isEdit) {
+              await api(`/api/v1/records/${existing.id}`, { method: 'PATCH', body });
+              toast('记录已修改并回写平台', 'ok');
+            } else {
+              await api(`/api/v1/domains/${domainId}/records`, { method: 'POST', body });
+              toast('记录已创建并回写平台', 'ok');
+            }
+            mask.remove();
+            load();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+    }
+
+    async function recordAction(act, recordId, host, targetStatus) {
+      try {
+        if (act === 'edit') {
+          const { items } = await api(`/api/v1/domains/${domainId}/records?page_size=200`);
+          const rec = items.find((r) => String(r.id) === String(recordId));
+          if (!rec) return toast('记录不存在，可能已被同步移除', 'err');
+          showRecordForm(rec);
+        } else if (act === 'toggle') {
+          const enable = targetStatus === 'enabled';
+          await api(`/api/v1/records/${recordId}/status`, { method: 'POST', body: { enabled: enable } });
+          toast(`${enable ? '已启用' : '已停用'}记录 ${host}（已回写平台）`, 'ok');
+          load();
+        } else if (act === 'delete') {
+          if (!confirm(`确认删除记录「${host}」？\n\n将同时从平台删除该解析记录。`)) return;
+          await api(`/api/v1/records/${recordId}`, { method: 'DELETE' });
+          toast(`记录 ${host} 已删除（已回写平台）`, 'ok');
+          load();
+        }
+      } catch (err) { toast(err.message, 'err'); }
+    }
+  </script>
+</AppLayout>

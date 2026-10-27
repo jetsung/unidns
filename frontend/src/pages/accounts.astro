@@ -1,0 +1,239 @@
+---
+import AppLayout from '../components/AppLayout.astro';
+---
+
+<AppLayout title="平台账户" active="accounts">
+  <script>
+    import { api, esc, fmtTime, toast, modal, modalFrame, requireAuth, PROVIDERS, busy, pollRun, pager, bindPager } from '../lib/app.js';
+
+    // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
+    document.addEventListener('astro:page-load', () => {
+      if (document.getElementById('app-shell')?.dataset.page !== 'accounts') return;
+      init();
+    });
+
+    let app;
+    const state = { page: 1, page_size: 10 };
+    async function init() {
+      await requireAuth();
+      app = document.getElementById('app');
+      await render();
+    }
+
+    function verifyTag(a) {
+      if (a.last_verified_at == null) return '<span class="badge outline">未验证</span>';
+      if (a.last_verify_ok) return `<span class="badge ok"><span class="dot"></span>通过</span>`;
+      return `<span class="badge err"><span class="dot"></span>失败</span>`;
+    }
+
+    function syncTag(a) {
+      if (a.last_sync_at == null) return '<span class="badge outline">从未同步</span>';
+      const cls = a.last_sync_status === 'success' ? 'ok' : 'err';
+      const label = a.last_sync_status === 'success' ? '成功' : '失败';
+      const err = a.last_sync_error ? ` title="${esc(a.last_sync_error)}"` : '';
+      return `<span class="badge ${cls}"${err}><span class="dot"></span>${label}</span>`;
+    }
+
+    async function render() {
+      let settings = { interval_minutes: null };
+      try { settings = await api('/api/v1/sync/settings'); } catch { /* 忽略 */ }
+      const { total, page, page_size, items } = await api(`/api/v1/accounts?page=${state.page}&page_size=${state.page_size}`);
+      // 当前页超出新总页数（如删除后）则回第一页
+      if (state.page > 1 && page > Math.max(1, Math.ceil(total / page_size))) {
+        state.page = 1;
+        return render();
+      }
+
+      const rows = items.map((a) => `
+                <tr>
+                  <td><span class="badge provider">${esc(a.provider_name)}</span></td>
+                  <td><b>${esc(a.name)}</b></td>
+                  <td class="mono muted">${esc(a.credentials_mask)}</td>
+                  <td>${a.status === 'enabled' ? '<span class="badge ok"><span class="dot"></span>启用</span>' : '<span class="badge warn"><span class="dot"></span>停用</span>'}</td>
+                  <td>${verifyTag(a)}<div class="sub">${esc(fmtTime(a.last_verified_at))}</div></td>
+                  <td>${syncTag(a)}<div class="sub">${esc(fmtTime(a.last_sync_at))}</div></td>
+                  <td class="actions" style="text-align:right">
+                    <button class="btn small" data-act="verify" data-id="${a.id}">验证</button>
+                    <button class="btn small" data-act="sync" data-id="${a.id}">同步</button>
+                    <button class="btn small" data-act="runs" data-id="${a.id}" data-name="${esc(a.name)}">历史</button>
+                    <button class="btn small" data-act="toggle" data-id="${a.id}" data-status="${a.status}">${a.status === 'enabled' ? '停用' : '启用'}</button>
+                    <button class="btn small danger" data-act="delete" data-id="${a.id}" data-name="${esc(a.name)}">删除</button>
+                  </td>
+                </tr>`).join('');
+
+      const tableHtml = items.length === 0
+        ? `<div class="empty"><div class="icon">🔌</div><div class="title">还没有平台账户</div><div>点击右上角「添加账户」接入阿里云 / 腾讯云 / EdgeOne / CloudFlare</div></div>`
+        : `<table>
+            <thead><tr>
+              <th>平台</th><th>名称</th><th>凭据</th><th>状态</th><th>连通性</th><th>最近同步</th><th style="text-align:right">操作</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+
+      app.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>平台账户</h1>
+            <div class="desc">管理各 DNS 平台的 API 凭据，验证连通性并同步域名数据</div>
+          </div>
+          <div class="grow"></div>
+          <div class="head-actions">
+            <button class="btn" id="interval-btn">定时同步：${settings.interval_minutes === 0 ? '不自动同步（仅手动）' : `每 ${esc(settings.interval_minutes)} 分钟`}</button>
+            <button class="btn" id="sync-all-btn">全量同步</button>
+            <button class="btn primary" id="add-account-btn">＋ 添加账户</button>
+          </div>
+        </div>
+        <div class="card card-table">${tableHtml}</div>
+        ${pager({ total, page, page_size })}`;
+
+      bindPager((p) => { state.page = p; render(); }, (s) => { state.page_size = s; state.page = 1; render(); });
+
+      document.getElementById('add-account-btn')?.addEventListener('click', showAddAccount);
+      document.getElementById('interval-btn')?.addEventListener('click', showIntervalSettings);
+      document.getElementById('sync-all-btn')?.addEventListener('click', async (e) => {
+        await busy(e.target, async () => {
+          try {
+            const r = await api('/api/v1/sync', { method: 'POST' });
+            toast(`后台同步已开始（${r.started.length} 个账户），完成后会提示结果`, 'ok');
+            await Promise.all(r.started.map((s) =>
+              pollRun(s.run_id, (res) => {
+                const msg = res.status === 'success'
+                  ? `${s.account_name} 同步完成：${res.stats?.domains ?? '—'} 个域名 / ${res.stats?.records ?? '—'} 条记录${res.error ? `（${res.error}）` : ''}`
+                  : `${s.account_name} 同步失败：${res.error || '未知原因'}`;
+                toast(msg, res.status === 'success' ? 'ok' : 'err');
+              }).catch((err) => toast(`${s.account_name}: ${err.message}`, 'err'))
+            ));
+            render();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+      app.querySelectorAll('button[data-act]').forEach((btn) => {
+        btn.addEventListener('click', () => accountAction(btn.dataset.act, btn.dataset.id, btn.dataset.name, btn.dataset.status));
+      });
+    }
+
+    function showAddAccount() {
+      const mask = modalFrame('添加平台账户', `
+        <div class="field">
+          <label for="provider-select">平台</label>
+          <select id="provider-select">
+            ${Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label for="acc-name">账户名称</label>
+          <input id="acc-name" required placeholder="例如：生产环境阿里云" />
+        </div>
+        <div id="cred-fields" style="display:flex;flex-direction:column;gap:14px"></div>
+      `, `
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="save-btn">保存账户</button>
+      `);
+
+      const renderFields = (ptype) => {
+        mask.querySelector('#cred-fields').innerHTML = PROVIDERS[ptype].fields
+          .map((f) => `
+            <div class="field">
+              <label for="f-${f.key}">${esc(f.label)}</label>
+              <input id="f-${f.key}" data-cred="${f.key}" required autocomplete="off" />
+              <span class="hint">${esc(f.hint)}</span>
+            </div>`).join('');
+      };
+      renderFields('aliyun');
+      mask.querySelector('#provider-select').onchange = (e) => renderFields(e.target.value);
+      mask.querySelector('#save-btn').addEventListener('click', async (e) => {
+        await busy(e.target, async () => {
+          const providerType = mask.querySelector('#provider-select').value;
+          const credentials = {};
+          PROVIDERS[providerType].fields.forEach((f) => {
+            credentials[f.key] = mask.querySelector(`[data-cred="${f.key}"]`).value;
+          });
+          try {
+            await api('/api/v1/accounts', {
+              method: 'POST',
+              body: { name: mask.querySelector('#acc-name').value.trim(), provider_type: providerType, credentials },
+            });
+            toast('账户已添加，建议先执行「验证」确认凭据可用', 'ok');
+            mask.remove();
+            render();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+    }
+
+    function showIntervalSettings() {
+      const mask = modalFrame('定时同步间隔', `
+        <div class="field">
+          <label for="interval-input">全量自动同步间隔（分钟）</label>
+          <input type="number" id="interval-input" min="0" required />
+          <span class="hint">0 表示停用自动同步；启用时至少 30 分钟</span>
+        </div>
+      `, `
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="save-interval">保存</button>
+      `);
+      api('/api/v1/sync/settings').then((s) => { mask.querySelector('#interval-input').value = s.interval_minutes; });
+      mask.querySelector('#save-interval').addEventListener('click', async (e) => {
+        await busy(e.target, async () => {
+          try {
+            await api('/api/v1/sync/settings', {
+              method: 'PUT',
+              body: { interval_minutes: Number(mask.querySelector('#interval-input').value) },
+            });
+            toast('同步间隔已保存', 'ok');
+            mask.remove();
+            render();
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+    }
+
+    function showSyncRuns(accountId, name) {
+      const mask = modalFrame(`同步历史 · ${esc(name)}`, `<div id="runs-body"><div class="loading">加载中…</div></div>`,
+        `<button class="btn" data-close>关闭</button>`);
+      api(`/api/v1/sync/runs?account_id=${accountId}`).then(({ items }) => {
+        mask.querySelector('#runs-body').innerHTML = items.length === 0
+          ? '<div class="empty">暂无同步记录</div>'
+          : `<table><thead><tr><th>开始时间</th><th>结果</th><th>域名/记录</th><th>说明</th></tr></thead><tbody>
+            ${items.map((r) => `<tr>
+              <td class="mono">${esc(fmtTime(r.started_at))}</td>
+              <td>${r.status === 'success' ? '<span class="badge ok"><span class="dot"></span>成功</span>' : r.status === 'failed' ? '<span class="badge err"><span class="dot"></span>失败</span>' : '<span class="badge outline">进行中</span>'}</td>
+              <td class="muted">${r.stats ? `${r.stats.domains ?? '—'} / ${r.stats.records ?? '—'}` : '—'}</td>
+              <td class="muted sub" style="max-width:220px">${esc(r.error || r.status === 'failed' ? r.error || '' : '')}</td>
+            </tr>`).join('')}</tbody></table>`;
+      }).catch((err) => { mask.querySelector('#runs-body').innerHTML = `<div class="empty error-note">${esc(err.message)}</div>`; });
+    }
+
+    async function accountAction(act, id, name, status) {
+      try {
+        if (act === 'verify') {
+          const r = await api(`/api/v1/accounts/${id}/verify`, { method: 'POST' });
+          toast(r.ok ? '连通性验证通过' : `验证失败：${r.message}`, r.ok ? 'ok' : 'err');
+          render();
+        } else if (act === 'sync') {
+          const r = await api(`/api/v1/accounts/${id}/sync`, { method: 'POST' });
+          toast('后台同步已开始，完成后会提示结果', 'ok');
+          pollRun(r.run_id, (res) => {
+            const msg = res.status === 'success'
+              ? `同步完成：${res.stats?.domains ?? '—'} 个域名 / ${res.stats?.records ?? '—'} 条记录${res.error ? `（${res.error}）` : ''}`
+              : `同步失败：${res.error || '未知原因'}`;
+            toast(msg, res.status === 'success' ? 'ok' : 'err');
+            render();
+          }).catch((err) => { toast(err.message, 'err'); render(); });
+        } else if (act === 'toggle') {
+          const target = status === 'enabled' ? 'disabled' : 'enabled';
+          await api(`/api/v1/accounts/${id}`, { method: 'PATCH', body: { status: target } });
+          toast(target === 'enabled' ? '账户已启用' : '账户已停用（不再参与同步）', 'ok');
+          render();
+        } else if (act === 'delete') {
+          if (!confirm(`确认删除账户「${name}」？\n\n仅删除本地数据（账户、域名、解析记录），不会改动平台侧任何资源。`)) return;
+          await api(`/api/v1/accounts/${id}`, { method: 'DELETE' });
+          toast('账户已删除', 'ok');
+          render();
+        } else if (act === 'runs') {
+          showSyncRuns(id, name);
+        }
+      } catch (err) { toast(err.message, 'err'); }
+    }
+  </script>
+</AppLayout>

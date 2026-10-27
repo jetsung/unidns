@@ -1,0 +1,36 @@
+---
+import AuthLayout from '../components/AuthLayout.astro';
+---
+
+<AuthLayout title="初始设置">
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="brand"><span class="brand-mark">U</span>UniDNS</div>
+      <div class="hint">首次使用，请设置管理员口令（至少 8 个字符）</div>
+      <form id="setup-form">
+        <div class="field">
+          <label for="password">口令</label>
+          <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 个字符" />
+        </div>
+        <div class="field">
+          <label for="password2">确认口令</label>
+          <input type="password" id="password2" name="password2" required minlength="8" autocomplete="new-password" placeholder="再次输入" />
+        </div>
+        <button class="btn primary" type="submit">完成设置并进入</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    import { api, toast } from '../lib/app.js';
+    document.getElementById('setup-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      if (f.password.value !== f.password2.value) return toast('两次输入的口令不一致', 'err');
+      try {
+        await api('/api/v1/auth/setup', { method: 'POST', body: { password: f.password.value } });
+        toast('口令设置成功', 'ok');
+        location.href = '/accounts';
+      } catch (err) { toast(err.message, 'err'); }
+    });
+  </script>
+</AuthLayout>

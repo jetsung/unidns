@@ -1,0 +1,23 @@
+---
+// 入口：根据登录态跳转到对应页面
+---
+
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UniDNS</title>
+    <script is:inline>
+      (async () => {
+        try {
+          const res = await fetch('/api/v1/auth/status');
+          const s = await res.json();
+          location.replace(s.initialized ? (s.authenticated ? '/accounts' : '/login') : '/setup');
+        } catch {
+          location.replace('/login');
+        }
+      })();
+    </script>
+  </head>
+  <body>跳转中…</body>
+</html>
