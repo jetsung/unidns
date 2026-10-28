@@ -1,0 +1,1292 @@
+openapi: 3.0.3
+info:
+  title: unidns API
+  version: 0.1.0
+  description: |
+    unidns 自托管多平台域名解析集中管理服务 REST API。
+
+    所有接口挂于 `/api/v1` 前缀下，除登录引导接口（`auth/status`、`auth/setup`、
+    `auth/login`）外均需会话 Cookie 鉴权（未登录返回 401）。
+
+    统一错误响应体：
+    ```json
+    {"error": {"code": "not_found", "message": "资源不存在"}}
+    ```
+
+    错误码与 HTTP 状态码映射：`invalid_request` 400、`unauthorized` 401、
+    `not_found` 404、`provider_unsupported` 409、`provider_rate_limited` 429、
+    `provider_network` / `provider_api` 502、`internal` 500。平台错误会透传平台
+    原始消息，限流时附带建议重试秒数。
+
+    本文档为静态手写描述，接口以源码为准；OpenAPI 供工具链（Swagger UI、
+    Postman、代码生成器等）消费。
+  license:
+    name: MIT
+servers:
+  - url: http://127.0.0.1:18686/api/v1
+    description: 默认本地监听
+security:
+  - cookieAuth: []
+
+tags:
+  - name: auth
+    description: 认证（登录、登出、口令管理）
+  - name: accounts
+    description: 平台账户管理
+  - name: domains
+    description: 域名管理
+  - name: records
+    description: 解析记录管理
+  - name: sync
+    description: 同步任务管理
+
+paths:
+  # ============================================================
+  # 认证 /auth
+  # ============================================================
+  /auth/status:
+    get:
+      tags: [auth]
+      security: []
+      summary: 初始化与登录状态
+      description: 返回是否已设置管理员口令、当前会话是否已登录。免认证。
+      operationId: getAuthStatus
+      responses:
+        '200':
+          description: 登录态自描述
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthStatus'
+
+  /auth/setup:
+    post:
+      tags: [auth]
+      security: []
+      summary: 首次设置管理员口令
+      description: 仅在管理员口令未初始化时可用；成功后直接建立会话。
+      operationId: setupAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRequest'
+      responses:
+        '204':
+          description: 口令设置成功，会话已建立
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: 管理员口令登录
+      description: 验证口令并颁发会话 Cookie。
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRequest'
+      responses:
+        '204':
+          description: 登录成功，会话 Cookie 已设置
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: 当前登录身份
+      description: 已登录身份探针。
+      operationId: getMe
+      responses:
+        '200':
+          description: 当前用户身份
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    enum: [admin]
+                required: [role]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 退出登录
+      description: 清空会话并删除 Cookie。
+      operationId: logout
+      responses:
+        '204':
+          description: 已登出
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/password:
+    post:
+      tags: [auth]
+      summary: 修改管理员口令
+      description: 需验证旧口令；新口令立即生效。
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: 口令已修改
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================
+  # 账户 /accounts
+  # ============================================================
+  /accounts:
+    get:
+      tags: [accounts]
+      summary: 账户列表
+      description: 返回全部平台账户（凭据脱敏），附最近一次同步结果，分页。
+      operationId: listAccounts
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: 账户列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [accounts]
+      summary: 新建平台账户
+      description: 校验凭据后加密入库。
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: 账户已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    format: int64
+                required: [id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /accounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountIdPath'
+    get:
+      tags: [accounts]
+      summary: 账户详情
+      operationId: getAccount
+      responses:
+        '200':
+          description: 账户详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [accounts]
+      summary: 更新账户
+      description: 修改名称 / 启停 / 更新凭据（换凭据后原验证结果作废）。
+      operationId: updateAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAccountRequest'
+      responses:
+        '204':
+          description: 已更新
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [accounts]
+      summary: 删除账户
+      description: 级联删除其域名与记录（仅本地，不触碰平台侧）。
+      operationId: deleteAccount
+      responses:
+        '204':
+          description: 已删除
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /accounts/{id}/verify:
+    parameters:
+      - $ref: '#/components/parameters/AccountIdPath'
+    post:
+      tags: [accounts]
+      summary: 验证账户凭据连通性
+      description: 调平台 API 验证凭据，记录结果。
+      operationId: verifyAccount
+      responses:
+        '200':
+          description: 验证结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                required: [ok, message]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /accounts/{id}/sync:
+    parameters:
+      - $ref: '#/components/parameters/AccountIdPath'
+    post:
+      tags: [accounts, sync]
+      summary: 触发单账户同步
+      description: 异步启动单账户同步，立即返回 run_id。
+      operationId: syncAccount
+      responses:
+        '202':
+          description: 同步已启动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  run_id:
+                    type: integer
+                    format: int64
+                  account_id:
+                    type: integer
+                    format: int64
+                required: [message, run_id, account_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # 域名 /domains
+  # ============================================================
+  /domains:
+    get:
+      tags: [domains]
+      summary: 域名列表
+      description: 域名统一视图（平台/账户标注 + 记录数），分页。
+      operationId: listDomains
+      parameters:
+        - name: keyword
+          in: query
+          description: 域名名称关键字（模糊匹配）
+          required: false
+          schema:
+            type: string
+        - name: provider
+          in: query
+          description: 按平台类型过滤
+          required: false
+          schema:
+            $ref: '#/components/schemas/ProviderType'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: 域名列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /domains/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DomainIdPath'
+    get:
+      tags: [domains]
+      summary: 域名详情
+      operationId: getDomain
+      responses:
+        '200':
+          description: 域名详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Domain'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [domains]
+      summary: 更新域名备注
+      description: |
+        先回写上游平台，再存本地。DNSPod 与阿里云支持域名备注（空字符串清除
+        上游备注）；CloudFlare/EdgeOne 域名无备注概念，仅本地保存。上游回写
+        失败（非 Unsupported）则不写本地。
+      operationId: updateDomain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDomainRemark'
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    format: int64
+                  remark:
+                    type: string
+                required: [id, remark]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /domains/{id}/records:
+    parameters:
+      - $ref: '#/components/parameters/DomainIdPath'
+    get:
+      tags: [records]
+      summary: 域名下解析记录列表
+      description: 支持类型/关键字/状态过滤 + 分页。
+      operationId: listRecords
+      parameters:
+        - name: type
+          in: query
+          description: 按记录类型过滤
+          required: false
+          schema:
+            $ref: '#/components/schemas/RecordType'
+        - name: keyword
+          in: query
+          description: 主机记录关键字（模糊匹配）
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: 按状态过滤
+          required: false
+          schema:
+            $ref: '#/components/schemas/RecordStatus'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: 记录列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [records]
+      summary: 新建解析记录
+      description: 创建记录并实时回写平台。
+      operationId: createRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordInput'
+      responses:
+        '201':
+          description: 记录已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    format: int64
+                  provider_record_id:
+                    type: string
+                required: [id, provider_record_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /records/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordIdPath'
+    patch:
+      tags: [records]
+      summary: 修改解析记录
+      description: 修改记录并回写平台；至少提供一个要修改的字段。
+      operationId: updateRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordUpdate'
+      responses:
+        '204':
+          description: 已修改
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [records]
+      summary: 删除解析记录
+      description: 删除记录并回写平台；平台侧已不存在时按幂等成功处理。
+      operationId: deleteRecord
+      responses:
+        '204':
+          description: 已删除
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /records/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/RecordIdPath'
+    post:
+      tags: [records]
+      summary: 启用/停用解析记录
+      description: 回写平台启停状态。
+      operationId: setRecordStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusRequest'
+      responses:
+        '204':
+          description: 状态已更新
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # 同步 /sync
+  # ============================================================
+  /sync:
+    post:
+      tags: [sync]
+      summary: 触发全量同步
+      description: 异步启动所有已启用账户的同步，立即返回任务列表。
+      operationId: syncNow
+      responses:
+        '202':
+          description: 同步已启动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  started:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StartedSync'
+                required: [message, started]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sync/runs:
+    get:
+      tags: [sync]
+      summary: 同步运行历史
+      description: 同步运行记录（倒序），可按账户过滤。
+      operationId: listSyncRuns
+      parameters:
+        - name: account_id
+          in: query
+          description: 按账户过滤
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          description: 返回条数上限（默认 50，clamp 1–500）
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 500
+            default: 50
+      responses:
+        '200':
+          description: 同步运行列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncRunListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sync/runs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RunIdPath'
+    get:
+      tags: [sync]
+      summary: 单次同步运行详情
+      description: 查询单次同步任务状态（前端轮询用）。
+      operationId: getSyncRun
+      responses:
+        '200':
+          description: 同步运行详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncRunDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sync/settings:
+    get:
+      tags: [sync]
+      summary: 读取同步设置
+      operationId: getSyncSettings
+      responses:
+        '200':
+          description: 同步设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [sync]
+      summary: 更新同步设置
+      description: 调整同步间隔（下一个调度周期生效）。
+      operationId: updateSyncSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncSettingsRequest'
+      responses:
+        '204':
+          description: 已更新
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+# ============================================================
+# Components
+# ============================================================
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: id
+      description: 会话 Cookie（tower-sessions 颁发）。除 `auth/status`、`auth/setup`、`auth/login` 外所有接口均需携带。
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: 页码（默认 1，最小 1）
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        default: 1
+    PageSizeParam:
+      name: page_size
+      in: query
+      description: 每页条数（默认 10，clamp 1–200）
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 200
+        default: 10
+    AccountIdPath:
+      name: id
+      in: path
+      description: 账户 ID
+      required: true
+      schema:
+        type: integer
+        format: int64
+    DomainIdPath:
+      name: id
+      in: path
+      description: 域名 ID
+      required: true
+      schema:
+        type: integer
+        format: int64
+    RecordIdPath:
+      name: id
+      in: path
+      description: 记录 ID
+      required: true
+      schema:
+        type: integer
+        format: int64
+    RunIdPath:
+      name: id
+      in: path
+      description: 同步运行 ID
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: invalid_request
+              message: 请求参数错误
+    Unauthorized:
+      description: 未登录或会话已过期
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: unauthorized
+              message: 未登录或会话已过期
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: not_found
+              message: 资源不存在
+    ProviderUnsupported:
+      description: 平台不支持该操作
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: provider_unsupported
+              message: 平台不支持该操作
+    ProviderRateLimited:
+      description: 平台限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: provider_rate_limited
+              message: 平台限流，请稍后重试
+    ProviderNetwork:
+      description: 平台网络错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: provider_network
+              message: 平台网络错误
+    ProviderApi:
+      description: 平台 API 错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: provider_api
+              message: 平台 API 错误
+    InternalError:
+      description: 内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: internal
+              message: 内部错误
+
+  schemas:
+    # ---------- 枚举 ----------
+    ProviderType:
+      type: string
+      enum: [aliyun, dnspod, dnspod_intl, edgeone, edgeone_intl, cloudflare]
+      description: 平台类型
+    AccountStatus:
+      type: string
+      enum: [enabled, disabled]
+      description: 账户状态
+    RecordType:
+      type: string
+      enum: [A, AAAA, CNAME, MX, TXT, NS, SRV, CAA]
+      description: 解析记录类型
+    RecordStatus:
+      type: string
+      enum: [enabled, disabled]
+      description: 记录状态
+
+    # ---------- 错误 ----------
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: 错误码
+              enum:
+                - invalid_request
+                - unauthorized
+                - not_found
+                - provider_unsupported
+                - provider_rate_limited
+                - provider_network
+                - provider_api
+                - internal
+            message:
+              type: string
+              description: 可读错误信息
+          required: [code, message]
+      required: [error]
+
+    # ---------- 认证 ----------
+    AuthStatus:
+      type: object
+      properties:
+        initialized:
+          type: boolean
+          description: 是否已设置管理员口令
+        authenticated:
+          type: boolean
+          description: 当前会话是否已登录
+      required: [initialized, authenticated]
+    PasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          description: 管理员口令（至少 8 个字符）
+          minLength: 8
+      required: [password]
+    ChangePasswordRequest:
+      type: object
+      properties:
+        old_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
+      required: [old_password, new_password]
+
+    # ---------- 账户 ----------
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        provider_type:
+          $ref: '#/components/schemas/ProviderType'
+        provider_name:
+          type: string
+          description: 平台显示名（中文）
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        credentials_mask:
+          type: string
+          description: 凭据脱敏字符串（如 ****xxxx）
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_verify_ok:
+          type: boolean
+          nullable: true
+        last_verify_msg:
+          type: string
+          nullable: true
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_sync_status:
+          type: string
+          nullable: true
+        last_sync_error:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - provider_type
+        - provider_name
+        - status
+        - credentials_mask
+        - created_at
+        - updated_at
+    CreateAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 账户名称（非空）
+        provider_type:
+          $ref: '#/components/schemas/ProviderType'
+        credentials:
+          type: object
+          description: |
+            平台凭据对象，字段随平台不同：
+            - aliyun: `access_key_id`, `access_key_secret`
+            - dnspod / dnspod_intl: `secret_id`, `secret_key`
+            - edgeone / edgeone_intl: `secret_id`, `secret_key`
+            - cloudflare: `api_token`
+          additionalProperties: true
+      required: [name, provider_type, credentials]
+    UpdateAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        credentials:
+          type: object
+          additionalProperties: true
+          description: 新凭据对象（同 CreateAccountRequest.credentials）
+      minProperties: 1
+
+    # ---------- 域名 ----------
+    Domain:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        status:
+          type: string
+        synced_at:
+          type: string
+          format: date-time
+        remark:
+          type: string
+        account_id:
+          type: integer
+          format: int64
+        account_name:
+          type: string
+        provider_type:
+          $ref: '#/components/schemas/ProviderType'
+        provider_name:
+          type: string
+          description: 平台显示名（中文）
+        record_count:
+          type: integer
+          format: int64
+          description: 该域名下记录数
+      required:
+        - id
+        - name
+        - status
+        - synced_at
+        - remark
+        - account_id
+        - account_name
+        - provider_type
+        - provider_name
+        - record_count
+    UpdateDomainRemark:
+      type: object
+      properties:
+        remark:
+          type: string
+          maxLength: 500
+          description: 域名备注（不超过 500 字符）
+      required: [remark]
+
+    # ---------- 解析记录 ----------
+    Record:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        domain_id:
+          type: integer
+          format: int64
+        domain_name:
+          type: string
+        account_id:
+          type: integer
+          format: int64
+        provider_type:
+          $ref: '#/components/schemas/ProviderType'
+        provider_name:
+          type: string
+        provider_record_id:
+          type: string
+        host:
+          type: string
+          description: 主机记录（根记录为 @）
+        rtype:
+          $ref: '#/components/schemas/RecordType'
+        value:
+          type: string
+        ttl:
+          type: integer
+          format: int64
+        line:
+          type: string
+          description: 解析线路（阿里云 / DNSPod；CloudFlare 为空）
+        proxied:
+          type: boolean
+          nullable: true
+          description: CloudFlare 代理状态；其他平台为 null
+        status:
+          $ref: '#/components/schemas/RecordStatus'
+        remark:
+          type: string
+        pending_sync:
+          type: boolean
+          description: 是否待同步
+        synced_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - domain_id
+        - domain_name
+        - account_id
+        - provider_type
+        - provider_name
+        - provider_record_id
+        - host
+        - rtype
+        - value
+        - ttl
+        - line
+        - proxied
+        - status
+        - remark
+        - pending_sync
+        - synced_at
+    RecordInput:
+      type: object
+      properties:
+        host:
+          type: string
+          description: 主机记录（非空，根记录用 @）
+        rtype:
+          $ref: '#/components/schemas/RecordType'
+        value:
+          type: string
+          description: 记录值（非空）
+        ttl:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400
+          default: 600
+          description: TTL（1–86400 秒）
+        line:
+          type: string
+          description: 解析线路（阿里云 / DNSPod）
+        proxied:
+          type: boolean
+          description: CloudFlare 代理状态
+        remark:
+          type: string
+      required: [host, rtype, value]
+    RecordUpdate:
+      type: object
+      properties:
+        host:
+          type: string
+        rtype:
+          $ref: '#/components/schemas/RecordType'
+        value:
+          type: string
+        ttl:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400
+        line:
+          type: string
+        proxied:
+          type: boolean
+        remark:
+          type: string
+      minProperties: 1
+    StatusRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required: [enabled]
+
+    # ---------- 同步 ----------
+    StartedSync:
+      type: object
+      properties:
+        account_id:
+          type: integer
+          format: int64
+        account_name:
+          type: string
+        run_id:
+          type: integer
+          format: int64
+      required: [account_id, account_name, run_id]
+    SyncRunDetail:
+      type: object
+      description: 单次同步运行详情（GET /sync/runs/{id} 返回）
+      properties:
+        id:
+          type: integer
+          format: int64
+        account_id:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [running, success, failed]
+        error:
+          type: string
+          nullable: true
+        stats:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 同步统计（动态 JSON）
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, account_id, status, error, stats, started_at, finished_at]
+    SyncRunListItem:
+      type: object
+      description: 同步运行列表项（GET /sync/runs 返回）
+      properties:
+        id:
+          type: integer
+          format: int64
+        account_id:
+          type: integer
+          format: int64
+          nullable: true
+        account_name:
+          type: string
+          nullable: true
+        scope:
+          type: string
+          enum: [all, single]
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [running, success, failed]
+        error:
+          type: string
+          nullable: true
+        stats:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 同步统计（动态 JSON）
+      required:
+        - id
+        - account_id
+        - account_name
+        - scope
+        - started_at
+        - finished_at
+        - status
+        - error
+        - stats
+    SyncSettings:
+      type: object
+      properties:
+        interval_minutes:
+          type: integer
+          format: int64
+          minimum: 1
+      required: [interval_minutes]
+    SyncSettingsRequest:
+      type: object
+      properties:
+        interval_minutes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 同步间隔（分钟，至少 1）
+      required: [interval_minutes]
+
+    # ---------- 列表响应 ----------
+    AccountListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+          format: int64
+        page_size:
+          type: integer
+          format: int64
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+      required: [total, page, page_size, items]
+    DomainListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+          format: int64
+        page_size:
+          type: integer
+          format: int64
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Domain'
+      required: [total, page, page_size, items]
+    RecordListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+          format: int64
+        page_size:
+          type: integer
+          format: int64
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Record'
+      required: [total, page, page_size, items]
+    SyncRunListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncRunListItem'
+      required: [items]

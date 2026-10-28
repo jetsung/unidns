@@ -1,0 +1,4 @@
+/* 拓宽正文列：zensical/Material 默认 .md-grid 限 61rem，表格类页面过窄。 */
+.md-grid {
+  max-width: 75rem;
+}
