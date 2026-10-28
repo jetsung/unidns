@@ -637,7 +637,8 @@
 <div class="language-json highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"not_found"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"资源不存在"</span><span class="p">}}</span>
 </span></code></pre></div>
 <p>错误码与 HTTP 状态码映射：<code>invalid_request</code> 400、<code>unauthorized</code> 401、
-<code>not_found</code> 404、<code>provider_unsupported</code> 409、<code>provider_rate_limited</code> 429、
+<code>not_found</code> 404、<code>provider_auth</code> 400（凭据无效）、<code>provider_not_found</code> 404
+（平台侧资源不存在）、<code>provider_unsupported</code> 409、<code>provider_rate_limited</code> 429、
 <code>provider_network</code> / <code>provider_api</code> 502、<code>internal</code> 500。平台错误（
 <code>provider_*</code>）会透传平台原始消息，限流时附带建议重试秒数。</p>
 <h2 id="auth">认证（/auth）<a class="headerlink" href="#auth" title="Permanent link">&para;</a></h2>
@@ -779,7 +780,7 @@
 <tr>
 <td>PATCH</td>
 <td><code>/records/{id}</code></td>
-<td>更新记录（host/rtype/value/ttl/line/remark/proxied）</td>
+<td>更新记录（host/rtype/value/ttl/line/remark/proxied/weight/priority）</td>
 </tr>
 <tr>
 <td>POST</td>

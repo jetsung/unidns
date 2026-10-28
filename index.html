@@ -592,7 +592,7 @@ Astro 构建的静态站点（编译期经 rust-embed 嵌入二进制），单�
   CloudFlare 六类提供商；同一平台可添加多个账户。</li>
 <li><strong>记录统一管理</strong>：域名列表、解析记录增删改、TTL/线路/启用停用、本地备注；
   部分操作直接回写上游平台。</li>
-<li><strong>同步引擎</strong>：手动触发或定时全量同步（默认 30 分钟），账户间并发（上限 3）、
+<li><strong>同步引擎</strong>：手动触发或定时全量同步（默认停用，启用时至少 30 分钟），账户间并发（上限 3）、
   平台限流自动退避重试；每次同步落运行记录（runs），可查历史与统计。</li>
 <li><strong>安全</strong>：管理员口令 Argon2id 哈希存储，会话 Cookie 鉴权；平台凭据以
   AES-256-GCM 加密落库，主密钥存于环境变量或 <code>&lt;data_dir&gt;/secret.key</code>（0600）；

@@ -731,14 +731,43 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w">            </span><span class="c1"># 含需要真实凭据的冒烟用例（默认 ignored）</span>
 </span></code></pre></div>
 <p>4 个 <code>#[ignore]</code> 用例是真实平台冒烟（阿里云/DNSPod/CloudFlare 连通性验证
-与端到端同步），需设置对应环境变量凭据后手动执行：
-<code>ALIYUN_ACCESS_KEY_ID</code> / <code>ALIYUN_ACCESS_KEY_SECRET</code> / <code>DNSPOD_SECRET_ID</code> /
-<code>DNSPOD_SECRET_KEY</code> / <code>CLOUDFLARE_API_TOKEN</code> 等，见
+与端到端同步），仅用于开发调试——用真实密钥调用平台线上 API，验证适配器
+签名与请求格式能通过平台校验（mock 服务器验证不了签名正确性）。普通
+<code>cargo test</code> 不会执行它们；需要时设置环境变量后手动执行：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--<span class="w"> </span>--ignored
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>环境变量</th>
+<th>提供什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>UNIDNS_TEST_ALIYUN_AK_ID</code> / <code>UNIDNS_TEST_ALIYUN_AK_SECRET</code></td>
+<td>阿里云 AccessKey，跑阿里云真实验证</td>
+</tr>
+<tr>
+<td><code>UNIDNS_TEST_DNSPOD_SECRET_ID</code> / <code>UNIDNS_TEST_DNSPOD_SECRET_KEY</code></td>
+<td>腾讯云密钥，跑 DNSPod 真实验证</td>
+</tr>
+<tr>
+<td><code>UNIDNS_TEST_DNSPOD_SITE=intl</code></td>
+<td>可选，走 DNSPod 国际站端点（国内外密钥体系独立）</td>
+</tr>
+<tr>
+<td><code>UNIDNS_TEST_CF_TOKEN</code></td>
+<td>CloudFlare API Token，跑 CF 真实验证</td>
+</tr>
+</tbody>
+</table>
+<p>不设置对应变量时相关测试打印「未提供凭据，跳过」后通过，不报错；变量定义见
 <code>src/providers/mod.rs</code> 测试模块。</p>
 <h2 id="_4">文档站点<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p>文档源在 <code>docs/</code>（zensical，配置见 <code>zensical.toml</code>），构建输出到 <code>site/</code>：</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>zensical<span class="w"> </span>build<span class="w"> </span>--clean<span class="w">    </span><span class="c1"># 构建到 site/</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>zensical<span class="w"> </span>serve<span class="w">            </span><span class="c1"># 本地预览（热更新）</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>zensical<span class="w"> </span>build<span class="w"> </span>--clean<span class="w">    </span><span class="c1"># 构建到 site/</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>zensical<span class="w"> </span>serve<span class="w">            </span><span class="c1"># 本地预览（热更新）</span>
 </span></code></pre></div>
 <p>推送 <code>docs/**</code> 或 <code>zensical.toml</code> 变更时，GitHub Actions（<code>.github/workflows/docs.yml</code>）
 会自动构建并发布到 gh-pages / EdgeOne Pages。</p>

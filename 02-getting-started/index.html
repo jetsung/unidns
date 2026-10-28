@@ -698,19 +698,42 @@
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/compose.yaml<span class="w"> </span>up<span class="w"> </span>-d
+<p>镜像内使用默认端口 <code>18686</code> 与默认数据目录（工作目录 <code>/app</code> 下的 <code>./data</code>，
+即 <code>/app/data</code>），无需设置 <code>UNIDNS_LISTEN</code> / <code>UNIDNS_DATA_DIR</code>。中国网络
+环境构建走 <code>CN.Dockerfile</code>（国内镜像源），国际/上线构建走 <code>Dockerfile</code>
+（官方源），运行方式完全一致。</p>
+<p><strong>docker run 方式</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 构建（仓库根目录执行；中国网络把 -f 换成 docker/CN.Dockerfile）</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>docker/Dockerfile<span class="w"> </span>-t<span class="w"> </span>unidns:dev<span class="w"> </span>.
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># 运行：把主机目录挂到容器数据目录 /app/data 持久化数据</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>data<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>chmod<span class="w"> </span><span class="m">0777</span><span class="w"> </span>data<span class="w">   </span><span class="c1"># 容器以 uid 65532 运行，目录需可写</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>unidns<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">18686</span>:18686<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/data:/app/data"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>--restart<span class="w"> </span>unless-stopped<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>unidns:dev
 </span></code></pre></div>
-<p>镜像构建详见仓库 <code>docker/Dockerfile</code>（国内网络可用 <code>CN.Dockerfile</code>，
-其中替换了镜像源）。</p>
+<p><strong>docker compose 方式</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/compose.yaml<span class="w"> </span>up<span class="w"> </span>-d<span class="w">      </span><span class="c1"># 首次会按需构建 unidns:dev</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/compose.yaml<span class="w"> </span>logs<span class="w"> </span>-f<span class="w">    </span><span class="c1"># 跟踪日志</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/compose.yaml<span class="w"> </span>down<span class="w">       </span><span class="c1"># 停止并移除容器</span>
+</span></code></pre></div>
+<p>compose 定义见 <code>docker/compose.yaml</code>：端口映射 <code>18686:18686</code>，数据落在
+仓库根的 <code>data/</code>。可选配置通过环境变量注入（优先级高于 config.toml）：
+<code>UNIDNS_MASTER_KEY</code>（凭据加密主密钥，64 位 hex）、<code>UNIDNS_ADMIN_PASSWORD</code>
+（预置管理员口令）、<code>UNIDNS_SYNC_INTERVAL</code>（定时同步间隔分钟数，0 停用）、
+<code>UNIDNS_LOG</code>（日志级别）。</p>
+<p>启动后访问 <code>http://127.0.0.1:18686</code>，首次进入 <code>/setup</code> 设置管理员口令。</p>
 </div>
 </div>
 </div>
 <p>启动成功后访问 <code>http://127.0.0.1:18686</code>。</p>
 <h2 id="_4">命令行用法<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>unidns<span class="w">              </span><span class="c1"># 不带子命令：加载配置并启动 Web 服务（与既有部署脚本兼容）</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>unidns<span class="w"> </span>init<span class="w">         </span><span class="c1"># 生成示例 config.toml（遵循 UNIDNS_CONFIG，已存在则不覆盖）</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>unidns<span class="w"> </span>version<span class="w">      </span><span class="c1"># 打印版本号（单行）</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>unidns<span class="w"> </span><span class="nb">help</span><span class="w">         </span><span class="c1"># 打印帮助（-h / --help 等价）</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>unidns<span class="w">              </span><span class="c1"># 不带子命令：加载配置并启动 Web 服务（与既有部署脚本兼容）</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>unidns<span class="w"> </span>init<span class="w">         </span><span class="c1"># 生成示例 config.toml（遵循 UNIDNS_CONFIG，已存在则不覆盖）</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>unidns<span class="w"> </span>version<span class="w">      </span><span class="c1"># 打印版本号（单行）</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>unidns<span class="w"> </span><span class="nb">help</span><span class="w">         </span><span class="c1"># 打印帮助（-h / --help 等价）</span>
 </span></code></pre></div>
 <p><code>init</code> 的目标路径与启动时读取的配置路径同源：默认当前目录的 <code>config.toml</code>，
 设置 <code>UNIDNS_CONFIG</code> 时指向该路径（父目录不存在会自动创建）。目标文件已存在时
