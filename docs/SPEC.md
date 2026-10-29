@@ -13,8 +13,8 @@
 
 UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形态）：
 
-- 把阿里云、腾讯云 DNSPod（国内/国际站）、EdgeOne（国内/国际站）、CloudFlare
-  六类 DNS 平台聚合到一个界面；同一平台可添加多个账户。
+- 把阿里云、腾讯云 DNSPod（国内/国际站）、EdgeOne（国内/国际站）、CloudFlare、
+  火山引擎七类 DNS 平台聚合到一个界面；同一平台可添加多个账户。
 - 从平台拉取域名（EdgeOne 为站点）列表与解析记录，维护本地统一视图。
 - 在统一视图上对解析记录执行跨平台一致的创建、修改、启用/停用与删除，
   操作实时回写对应平台。
@@ -26,7 +26,7 @@ UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形�
 
 | 术语 | 含义 |
 |---|---|
-| 账户（account） | 某一 DNS 平台的 API 凭据条目，六种平台类型之一 |
+| 账户（account） | 某一 DNS 平台的 API 凭据条目，七种平台类型之一 |
 | 域名/站点（domain） | 从平台同步下来的 zone；EdgeOne 对应「站点」 |
 | 解析记录（record） | 域名下的一条 DNS 记录，含上游平台记录标识 |
 | 同步（sync） | 从平台拉取域名与解析记录并按平台侧数据覆盖本地 |
@@ -41,13 +41,13 @@ UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形�
 
 ```
 浏览器 ──静态页面──> 内嵌 Web 前端（编译期嵌入二进制）
-   └──/api/v1/*──> Web 层（会话鉴权）──> 同步引擎 ──> 平台适配器 ──> 六个 DNS 平台
+   └──/api/v1/*──> Web 层（会话鉴权）──> 同步引擎 ──> 平台适配器 ──> 七个 DNS 平台
                         └───────────── SQLite（WAL 模式）<────────────┘
 ```
 
 - **Web 层**：HTTP 路由与会话鉴权，按 auth / accounts / records / sync 分组。
 - **同步引擎**：账户级并发调度、平台限流退避、同步运行记录。
-- **平台适配器**：统一的提供商接口 + 六个实现 + 按平台类型构造的工厂。
+- **平台适配器**：统一的提供商接口 + 七个实现 + 按平台类型构造的工厂。
 - **存储**：SQLite，WAL 模式 + 外键约束 + 忙等待；启动时执行迁移。
 
 ### 2.2 功能模块划分
@@ -59,10 +59,10 @@ UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形�
 | 加密 | 凭据 AES-256-GCM 加解密、主密钥管理、管理员口令 Argon2id 哈希 |
 | 数据库 | 连接池与迁移（五张表，见 §6） |
 | 数据行结构 | Account / Domain / Record / SyncRun 等数据模型 |
-| 平台适配器 | 统一提供商接口 + 六实现 + 工厂 |
+| 平台适配器 | 统一提供商接口 + 七实现 + 工厂 |
 | 同步引擎 | 账户并发、限流退避、运行记录、定时调度 |
 | Web 层 | REST API 路由 + 会话鉴权 + 统一错误 |
-| 静态前端 | Astro 构建产物在编译期嵌入；开发时代理 `/api` 到后端 |
+| 静态前端 | Astro 构建产物在编译期嵌入（含品牌图标、Web App Manifest 与 Service Worker）；开发时代理 `/api` 到后端 |
 | 错误 | 统一错误类型：到 HTTP 状态码与 `{"error":{code,message}}` 的映射 |
 
 ### 2.3 命令行入口
@@ -114,10 +114,13 @@ UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形�
 
 ## 4. 安全规范
 
-- **管理员口令**：以 Argon2id 单向哈希存储（存于 `settings` 表）；任何接口
-  与存储文件不得出现口令明文。口令长度至少 8 个字符。首次启动未设置口令时
-  引导设置，也可用 `UNIDNS_ADMIN_PASSWORD` 预置（仅创建时生效）。修改口令
-  需验证旧口令，新口令立即生效。
+- **管理员口令**：以 Argon2id 单向哈希存储（存于 `settings` 表，键
+  `admin_password_hash`）；任何接口与存储文件不得出现口令明文。口令长度
+  至少 8 个字符。首次启动未设置口令时引导设置，也可用 `UNIDNS_ADMIN_PASSWORD`
+  预置（仅创建时生效）。修改口令需验证旧口令，新口令立即生效。忘记口令时提供
+  `unidns reset-password` 子命令作为运维通道：连接配置指向的数据库，交互式
+  输入新口令后直接覆盖哈希，**跳过旧口令校验**（要求执行者具备数据库
+  文件访问权限，执行前应停止 Web 服务）；不影响已存的账户凭据。
 - **会话**：登录成功颁发会话 Cookie（内存会话存储；Cookie 属性 httpOnly、
   `SameSite=Lax`，不设 Secure 以兼容反向代理终止 TLS 的 HTTP 部署）；除登录
   引导接口（`auth/status`、`auth/login`、`auth/setup`）外一切 API 与页面要求
@@ -162,8 +165,9 @@ set_domain_remark(zone, remark)
 | EdgeOne 国内（`edgeone`） | `secret_id`、`secret_key` | 腾讯云控制台 → API 密钥 |
 | EdgeOne 国际（`edgeone_intl`） | `secret_id`、`secret_key` | EdgeOne 国际站 → API 密钥 |
 | CloudFlare（`cloudflare`） | `api_token` | My Profile → API Tokens（需 Zone.DNS 编辑权限） |
+| 火山引擎（`volcengine`） | `access_key_id`、`access_key_secret` | 火山引擎控制台 → AccessKey（需云解析 DNS 权限） |
 
-- 平台类型为封闭枚举（六值），提交列表外的类型拒绝保存。
+- 平台类型为封闭枚举（七值），提交列表外的类型拒绝保存。
 - 凭据必填字段缺失时拒绝保存并指出缺失字段。
 - 国内站与国际站账号体系独立，密钥不通用；验证与同步按所选站点的端点执行。
 
@@ -171,10 +175,12 @@ set_domain_remark(zone, remark)
 
 - **签名**：阿里云 RPC 签名（HMAC-SHA1 + PercentEncode，GET 公共参数）；
   DNSPod 与 EdgeOne 共用腾讯云 TC3-HMAC-SHA256；CloudFlare 使用
-  `Authorization: Bearer <token>`。
+  `Authorization: Bearer <token>`；火山引擎使用 V4 HMAC-SHA256 签名
+  （`Action`/`Version` 公共参数，GET/POST RPC 调用，端点
+  `dns.volcengineapi.com`）。
 - **连通性验证调用**：阿里云 `DescribeDomains`、DNSPod/EdgeOne
-  `DescribeZoneList`、CloudFlare `GET /zones`；失败提示透传平台原始错误码
-  与消息。
+  `DescribeZoneList`、CloudFlare `GET /zones`、火山引擎 `ListZones`；失败
+  提示透传平台原始错误码与消息。
 - **能力差异**：所有平台均支持验证、域名列表、记录增删改查、启用/停用、
   记录与域名备注；个别平台备注能力受上游 API 限制，调用不支持的平台返回
   `Unsupported`（HTTP 409，错误码 `provider_unsupported`）。
@@ -192,7 +198,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 |---|---|---|
 | id | INTEGER | 主键自增 |
 | name | TEXT | 非空，账户名 |
-| provider_type | TEXT | 非空，CHECK 六值枚举：`aliyun`/`dnspod`/`dnspod_intl`/`cloudflare`/`edgeone`/`edgeone_intl` |
+| provider_type | TEXT | 非空，CHECK 七值枚举：`aliyun`/`dnspod`/`dnspod_intl`/`cloudflare`/`edgeone`/`edgeone_intl`/`volcengine` |
 | credentials_enc | BLOB | 非空，AES-256-GCM 密文（nonce 前置） |
 | credentials_mask | TEXT | 非空默认 `''`，打码展示串 |
 | status | TEXT | 非空默认 `enabled`，CHECK `enabled`/`disabled` |
@@ -231,6 +237,8 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 | pending_sync | INTEGER | 非空默认 0，待同步标记 |
 | synced_at | TEXT | 非空 |
 | remark | TEXT | 非空默认 `''`，本地备注 |
+| weight | INTEGER | 可空，权重（EdgeOne 适用，-1~100；-1 视为未设置存空） |
+| priority | INTEGER | 可空，优先级（EdgeOne MX 适用，0~50；0 视为未设置存空） |
 
 **sync_runs（同步运行历史）**
 
@@ -255,7 +263,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 
 ### 7.1 添加账户
 
-- 录入时必选平台类型（§5.2 六值枚举）与对应凭据字段；提交不支持的类型或
+- 录入时必选平台类型（§5.2 七值枚举）与对应凭据字段；提交不支持的类型或
   缺失必填字段时拒绝保存并给出明确错误提示。
 - 保存成功后账户出现在账户列表中；保存前应对凭据做连通性验证（§7.3）。
 
@@ -285,6 +293,8 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 - 支持对单个已启用账户触发同步：拉取该账户下域名列表及每个域名的解析记录，
   以平台侧数据为准更新本地存储（平台新增→本地新增；平台删除→本地移除，
   不残留孤儿记录；记录归属域名与账户）。
+- EdgeOne 权重/优先级随同步落库：权重 `-1`、优先级 `0` 视为未设置（本地为空），
+  其余值原样保存；EdgeOne 解析线路不作为本地线路字段保存（本地为空）。
 - 支持全量同步：一次触发对所有已启用账户执行；单个账户失败不中断其他账户，
   失败账户在结果中标记。
 
@@ -326,25 +336,32 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 
 ### 9.1 创建
 
-在指定域名下创建解析记录（主机记录、类型、记录值、TTL、线路/代理状态等）；
-创建成功 MUST 同步写往对应平台，并保存平台返回的记录标识。参数无效时拒绝
-创建并返回具体字段错误，**不调用平台接口**。本地校验规则：
+在指定域名下创建解析记录（主机记录、类型、记录值、TTL、线路/代理状态、
+权重、优先级等按平台适用的字段）；创建成功 MUST 同步写往对应平台，并保存
+平台返回的记录标识。参数无效时拒绝创建并返回具体字段错误，**不调用平台
+接口**。本地校验规则：
 
 - 主机记录（host）非空，根记录使用 `@`；
 - 记录类型限定八种：`A`、`AAAA`、`CNAME`、`MX`、`TXT`、`NS`、`SRV`、`CAA`；
 - 记录值（value）非空；
-- TTL 在 1–86400 秒之间。
+- TTL 在 1–86400 秒之间；
+- 权重（weight）非空时在 -1~100 之间，优先级（priority）非空时在 0~50 之间。
+
+火山引擎域名的记录备注受平台长度限制校验，超长拒绝且不调用平台接口；
+解析线路未提交时按 `default` 回写。
 
 ### 9.2 修改
 
-修改已有记录的主机记录、类型、记录值、TTL 等字段；修改 MUST 回写到平台同
-一条记录。平台侧记录已不存在时返回失败并提示，本地记录标记待同步。
+修改已有记录的主机记录、类型、记录值、TTL、权重、优先级等字段；修改 MUST
+回写到平台同一条记录。平台侧记录已不存在时返回失败并提示，本地记录标记
+待同步。火山引擎更新接口要求主机记录与线路为必填项，未变更时仍以当前值
+回填这两项。
 
 ### 9.3 启用/停用
 
 对一条记录启用/停用，映射为对应平台操作（阿里云启停、DNSPod 启停、EdgeOne
-`ModifyDnsRecordsStatus`）；平台不支持时返回明确的不支持提示。操作后本地
-状态同步更新。
+`ModifyDnsRecordsStatus`、火山引擎 `UpdateRecordStatus`）；平台不支持时返回
+明确的不支持提示。操作后本地状态同步更新。
 
 ### 9.4 删除
 
@@ -361,6 +378,19 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 
 支持按域名、所属平台/账户、记录类型、启用状态与关键字过滤解析记录，供
 控制台域名详情页使用；本地备注仅存本地（`remark`，不回写平台）。
+
+### 9.7 权重与优先级
+
+解析记录支持可选的权重（`weight`）与优先级（`priority`）字段：
+
+- EdgeOne 适配器在权重留空时按平台默认值 `-1`、优先级留空时按平台默认值
+  `0` 处理；权重仅对 A/AAAA/CNAME 记录下发（-1~100），优先级仅对 MX 记录
+  下发（0~50）。字段不适用于记录类型时不下发，不影响其他字段。
+- EdgeOne 返回的记录在适配器层归一：权重 `-1`、优先级 `0` 视为未设置
+  （本地为空）；解析线路不纳入统一视图（`line` 恒为空）。
+- 修改接口以适配器返回值落库，保证归一结果持久化；其他平台两项恒为空，
+  即使传入也不会下发到平台。
+- 权重/优先级越界直接拒绝且不调用平台接口（见 §9.1 校验规则）。
 
 ## 10. REST API 规范（web-console）
 
@@ -432,7 +462,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 | PATCH | `/domains/{id}` | 更新本地备注（不回写平台） |
 | GET | `/domains/{id}/records?page=&page_size=&...` | 记录分页列表（搜索/类型/状态过滤） |
 | POST | `/domains/{id}/records` | 新建记录（回写平台） |
-| PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied） |
+| PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied/weight/priority） |
 | POST | `/records/{id}/status` | 启用/停用（回写平台） |
 | DELETE | `/records/{id}` | 删除记录（回写平台） |
 
@@ -468,7 +498,13 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 - **域名列表页**：可见当前页已同步域名及其所属平台/账户、记录数量，可进入
   域名详情，表格下方提供分页控件。
 - **域名详情页（解析记录页）**：可见当前页解析记录，可创建、修改、启停、
-  删除记录及按类型/关键字过滤，表格下方提供分页控件。
+  删除记录及按类型/关键字过滤，表格下方提供分页控件。记录字段列按域名所属
+  平台展示：EdgeOne（国内/国际站）不展示「解析线路」列与输入项，改为展示
+  「权重」「优先级」列（无值显示空占位），创建/修改表单仅对 EdgeOne 提供权重
+  （A/AAAA/CNAME）与优先级（MX）输入，留空表示使用平台默认值（编辑时权重
+  留空提交 `-1`、优先级留空提交 `0`）；火山引擎保持「解析线路」展示（展示
+  平台返回值，默认 `default`），不展示权重与优先级；其他平台保持线路与
+  CloudFlare 代理的既有展示。
 
 通用界面行为：
 
@@ -479,6 +515,10 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
   登录/设置页、文档注释等）；代码标识符（二进制名、环境变量前缀、本地存储
   键名、软件包名）不受此约束。
 - 侧边栏 LOGO 背景图悬停时呈现比默认状态更浅（更亮）的色调，不得变深。
+- 域名列表页的域名列与域名详情页的主机记录列在悬停单元格时于文本旁展示
+  「复制」图标按钮，点击将完整域名 / 完整记录名（主机记录拼接域名，根记录
+  为域名本身）写入系统剪贴板并给出成功提示；写入失败时给出失败提示，
+  不静默失败。
 
 ### 11.2 分页界面
 
@@ -491,6 +531,28 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
   （上一页/下一页禁用）。
 - 分页参数传递给对应列表 API（§10.2）。
 
+### 11.3 品牌图标与可安装 PWA
+
+- **图标资源**：系统 SHALL 提供源自登录页 brand 图形（"U" 圆角方块、蓝紫
+  渐变）的图片资源，包括 PNG favicon、ICO 兼容格式与 192px / 512px 应用
+  图标；页面内由 CSS 绘制的 brand 展示 SHALL 保持不变。
+- **页面引用**：所有页面（登录页、首次设置页、管理页与入口跳转页）的 HTML
+  head SHALL 引用 PNG favicon、`/favicon.ico` 兜底与 Web App Manifest，
+  浏览器标签页显示品牌图标；直接请求 `/favicon.ico` SHALL 返回 ICO 格式的
+  品牌图标。
+- **Web App Manifest**：SHALL 提供 manifest，声明应用名称 `UniDNS`、192px
+  与 512px 图标、主题色与背景色（取界面设计系统的固定值）、
+  `display: standalone` 与 `start_url`，使控制台可被浏览器识别为可安装
+  应用；安装后以声明的名称与品牌图标在独立窗口打开。
+- **Service Worker 缓存**：所有页面 SHALL 注册 Service Worker；同源 GET 且
+  非 `/api/` 的静态资源（页面、脚本、样式、图标、manifest）采用缓存优先
+  （未命中回源并写入缓存）；`/api/` 请求与跨域请求 MUST 直连网络，既不
+  返回缓存副本也不写入缓存；缓存 SHALL 按版本命名，新版本激活时 SHALL
+  删除旧版本缓存。
+- **降级**：Service Worker 仅在安全上下文（HTTPS 或 localhost）可用；HTTP
+  部署下注册失败 MUST 静默忽略、不影响既有功能，favicon 与 manifest 仍然
+  生效，PWA 降级为普通网页。
+
 ## 12. 部署形态
 
 ### 12.1 裸机 / 单二进制
@@ -499,26 +561,38 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 `./data`。需备份的数据只有数据目录：`unidns.db`（SQLite，WAL 模式，热备份
 建议 `sqlite3 unidns.db ".backup backup.db"`）与 `secret.key`（必须）。
 
+控制台可直接以 HTTP 访问；若需安装为桌面/主屏应用（PWA），应经反向代理启用
+HTTPS——Service Worker 仅在 HTTPS 或 localhost 下可用，HTTP 访问时自动降级
+为普通网页（品牌图标与 manifest 不受影响，见 §11.3）。
+
 ### 12.2 Docker
 
-- 多阶段构建：前端构建（Node/pnpm，产物为静态站点）→ 静态编译（musl 静态
-  链接，无 glibc 依赖）→ 运行阶段使用 distroless static、非 root（uid 65532），
-  出站 HTTPS 根证书由基础镜像自带。全程 rustls、无 OpenSSL。
-- 提供两份等价 Dockerfile：官方源版与国内镜像源版，仅镜像源配置不同。
+- 发行镜像：`ghcr.io/jetsung/unidns:latest`（多架构 amd64/arm64，随版本
+  标签发布），可直接拉取运行，无需本地构建。
+- 源码构建：多阶段构建，前端构建（Node/pnpm，产物为静态站点）→ 静态编译
+  （musl 静态链接，无 glibc 依赖）→ 运行阶段使用 distroless static、非 root
+  （uid 65532），出站 HTTPS 根证书由基础镜像自带。全程 rustls、无 OpenSSL。
+  提供两份等价 Dockerfile：官方源版与国内镜像源版，仅镜像源配置不同。
 - 运行阶段 **不注入 `UNIDNS_LISTEN` / `UNIDNS_DATA_DIR`**：监听用默认
   `0.0.0.0:18686`，数据目录用默认工作目录下的 `./data`。工作目录为 `/app`
   且属主为运行用户，数据落在 `/app/data`；`EXPOSE 18686`，
   `VOLUME /app/data`。
-- docker run 方式：构建后 `-p 18686:18686 -v <主机目录>:/app/data` 运行；
-  主机目录需对 uid 65532 可写。
-- docker compose 方式：端口映射 `18686:18686`，挂载 `../data:/app/data`，
-  `restart: unless-stopped`；可选环境变量 `UNIDNS_MASTER_KEY`、
-  `UNIDNS_ADMIN_PASSWORD`、`UNIDNS_SYNC_INTERVAL`、`UNIDNS_LOG`。
+- docker run 方式：`-p 18686:18686 -v <主机目录>:/app/data` 运行；
+  主机目录需归属 uid 65532（`chown -R 65532:65532 ./data`）。
+- docker compose 方式（推荐）：使用 `image: ghcr.io/jetsung/unidns:latest`，
+  端口映射 `18686:18686`，挂载 `./data:/app/data`，
+  `restart: unless-stopped`；可选 `env_file: ./.env`（`required: false`，
+  需 Compose v2.24+）注入 `UNIDNS_MASTER_KEY`、`UNIDNS_ADMIN_PASSWORD`、
+  `UNIDNS_SYNC_INTERVAL`、`UNIDNS_LOG`。使用本地构建镜像的 compose 见
+  `docker/compose.yaml`（`unidns:dev`）。
 
 ### 12.3 前端开发模式
 
 前端为静态站点构建产物；开发时开发服务器将 `/api` 代理到本地 `18686`
-后端，无需改动后端。
+后端，无需改动后端。品牌图标、manifest 与 `sw.js` 等 PWA 资源位于前端
+`public/` 目录，构建时原样复制到产物根路径；开发服务器下同样以根路径访问。
+页面会注册 Service Worker，开发时若前端改动后仍加载旧静态资源，需在浏览器
+开发者工具中注销 Service Worker 并清空 Cache Storage（或强制刷新）。
 
 ## 13. 参考实现（非规范性说明）
 

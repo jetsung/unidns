@@ -296,6 +296,8 @@ mod tests {
                 proxied: Some(false),
                 enabled: true,
                 remark: None,
+                weight: None,
+                priority: None,
             });
             list[0].value = "9.9.9.9".into(); // 变更 rec-...-1
             list.remove(1); // 删除 rec-...-2（孤儿）
@@ -496,6 +498,8 @@ mod tests {
                     proxied: None,
                     enabled: true,
                     remark: None,
+                    weight: None,
+                    priority: None,
                 }],
             );
             guard.records.insert(
@@ -510,6 +514,8 @@ mod tests {
                     proxied: None,
                     enabled: true,
                     remark: None,
+                    weight: None,
+                    priority: None,
                 }],
             );
             // 第一次记录拉取（a.com）被拒，b.com 正常

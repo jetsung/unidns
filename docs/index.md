@@ -18,7 +18,10 @@ Astro 构建的静态站点（编译期经 rust-embed 嵌入二进制），单�
   AES-256-GCM 加密落库，主密钥存于环境变量或 `<data_dir>/secret.key`（0600）；
   界面仅展示打码后的凭据。
 - **单二进制部署**：前端静态资源编译期嵌入，运行只依赖一个可执行文件加
-  SQLite 数据目录；提供 Dockerfile 与 compose 编排。
+  SQLite 数据目录；提供官方镜像 `ghcr.io/jetsung/unidns:latest`、Dockerfile
+  与 compose 编排。
+- **品牌图标与可安装 PWA**：全站统一品牌图标；内置 Web App Manifest 与仅
+  缓存静态资源的 Service Worker，可安装到桌面/主屏（需 HTTPS 或 localhost）。
 
 ## 阅读路径
 

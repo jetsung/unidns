@@ -305,7 +305,7 @@ function showSyncRuns(accountId, name) {
   const mask = modal(`<h2>同步历史 · ${esc(name)}</h2><div id="runs-body"><div class="loading">加载中…</div></div>
     <div class="modal-actions"><button class="btn" id="close-btn">关闭</button></div>`);
   mask.querySelector("#close-btn").onclick = () => mask.remove();
-  api(`/api/v1/sync/runs?account_id=${accountId}`).then(({ items }) => {
+  api(`/api/v1/sync/runs?account_id=${accountId}&limit=5`).then(({ items }) => {
     mask.querySelector("#runs-body").innerHTML = items.length === 0
       ? '<div class="empty">暂无同步记录</div>'
       : `<table><thead><tr><th>开始时间</th><th>结果</th><th>域名/记录</th><th>错误</th></tr></thead><tbody>

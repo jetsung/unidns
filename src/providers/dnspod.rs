@@ -280,6 +280,8 @@ fn parse_record(v: &Value) -> Option<ProviderRecord> {
             .and_then(|r| r.as_str())
             .filter(|r| !r.is_empty())
             .map(String::from),
+        weight: None,
+        priority: None,
     })
 }
 
@@ -382,6 +384,8 @@ impl DnsProvider for DnspodProvider {
             proxied: None,
             enabled: true,
             remark: input.remark.clone(),
+            weight: None,
+            priority: None,
         })
     }
 

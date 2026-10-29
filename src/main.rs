@@ -12,9 +12,10 @@ const HELP_TEXT: &str = r#"unidns — 统一 DNS 管理服务
 不带子命令时默认启动 Web 服务。
 
 子命令:
-  init      生成示例配置文件 config.toml（遵循 UNIDNS_CONFIG，已存在时不覆盖）
-  version   输出版本号
-  help      打印本帮助信息
+  init            生成示例配置文件 config.toml（遵循 UNIDNS_CONFIG，已存在时不覆盖）
+  reset-password  强制重置管理员口令（忘记口令时使用，跳过旧口令校验）
+  version         输出版本号
+  help            打印本帮助信息
 
 标志:
   -h, --help  等价于 help
@@ -60,6 +61,76 @@ fn run_version() -> i32 {
     0
 }
 
+/// `reset-password` 子命令：强制重置管理员口令。
+///
+/// 忘记口令时的运维通道：直接连接配置指向的数据库，跳过旧口令校验，
+/// 用命令行交互输入的新口令覆盖 `settings.admin_password_hash`。
+/// 执行前应停止 Web 服务以避免写冲突。
+async fn run_reset_password() -> i32 {
+    let cfg = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("加载配置失败: {e}");
+            return 2;
+        }
+    };
+    init_tracing();
+    if let Err(e) = cfg.ensure_bootstrap_files() {
+        eprintln!("初始化数据目录失败: {e}");
+        return 2;
+    }
+
+    let pool = match db::init_from_config(&cfg).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("连接数据库失败: {e}");
+            return 2;
+        }
+    };
+
+    if crypto::has_admin_password(&pool).await {
+        eprintln!("注意：当前已设置管理员口令，将强制覆盖（无需旧口令）。");
+    } else {
+        eprintln!("当前未设置管理员口令，将直接设置。");
+    }
+
+    let new = match read_new_password() {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    if let Err(e) = crypto::force_reset_admin_password(&pool, &new).await {
+        eprintln!("重置口令失败: {e}");
+        return 2;
+    }
+    println!("管理员口令已重置。请重新启动服务并以新口令登录。");
+    0
+}
+
+/// 交互式读取新口令（≥8 字符），从 stdin 读取一次。
+fn read_new_password() -> Result<String, i32> {
+    use std::io::{BufRead, Write};
+
+    eprint!("输入新口令（≥8 位）: ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) => Err(2), // EOF
+        Ok(_) => {
+            let pw = line.trim_end_matches(['\r', '\n']).to_string();
+            if pw.chars().count() < 8 {
+                eprintln!("口令长度至少 8 个字符");
+                return Err(2);
+            }
+            Ok(pw)
+        }
+        Err(e) => {
+            eprintln!("读取输入失败: {e}");
+            Err(2)
+        }
+    }
+}
+
 fn print_help(to_stderr: bool) {
     if to_stderr {
         eprint!("{HELP_TEXT}");
@@ -80,6 +151,7 @@ async fn main() -> std::process::ExitCode {
             }
         },
         Some("init") => std::process::ExitCode::from(run_init() as u8),
+        Some("reset-password") => std::process::ExitCode::from(run_reset_password().await as u8),
         Some("version") => std::process::ExitCode::from(run_version() as u8),
         Some("help" | "-h" | "--help") => {
             print_help(false);

@@ -1,6 +1,6 @@
 # UniDNS · 多平台域名解析集中管理
 
-自托管的 Web 服务，把分散在**阿里云 / 腾讯云 DNSPod（国内、国际站）/ EdgeOne（国内、国际站）/ CloudFlare** 的域名解析统一纳管：一处录入各平台 API 密钥，统一查看全部域名与解析记录，创建、修改、启用/停用、删除记录时实时回写对应平台。
+自托管的 Web 服务，把分散在**阿里云 / 腾讯云 DNSPod（国内、国际站）/ EdgeOne（国内、国际站）/ CloudFlare / 火山引擎** 的域名解析统一纳管：一处录入各平台 API 密钥，统一查看全部域名与解析记录，创建、修改、启用/停用、删除记录时实时回写对应平台。
 
 - **单二进制交付**：Web 界面嵌入可执行文件，运行只需一个数据目录（SQLite + 密钥文件）
 - **API-first**：界面与外部系统共用同一套 REST API（`/api/v1`）
@@ -27,12 +27,19 @@ cargo build --release
 ```
 unidns              不带子命令：加载配置并启动 Web 服务（与既有部署脚本兼容）
 unidns init         生成示例配置文件（遵循 UNIDNS_CONFIG，默认 ./config.toml；已存在则不覆盖）
+unidns reset-password  强制重置管理员口令（忘记口令时使用，跳过旧口令校验，交互输入新口令）
 unidns version      打印版本号（单行，便于脚本解析）
 unidns help         打印帮助（-h / --help 等价）
 ```
 
-成功时退出码 `0`；`init` 目标已存在、未知子命令或非法标志时退出码 `2`，
-未知子命令还会把帮助信息打印到标准错误且不启动服务。
+成功时退出码 `0`；`init` 目标已存在、`reset-password` 口令不合规、
+未知子命令或非法标志时退出码 `2`，未知子命令还会把帮助信息打印到标准错误且不启动服务。
+
+`reset-password` 是忘记口令时的运维通道：连接配置（`UNIDNS_DATA_DIR` /
+`UNIDNS_CONFIG`）指向的数据库，交互式输入新口令后直接覆盖
+`admin_password_hash`，**不校验旧口令**。执行前应先停止 Web 服务以避免写冲突，
+完成后重启服务即可用新口令登录。此操作不影响已存的账户凭据（凭据用 `master_key`
+加密，与口令哈希无关），但要求 `data/secret.key` 仍在。
 
 无真实平台凭据想先体验界面：
 
@@ -52,6 +59,7 @@ cargo run --example demo_server   # 内置内存 mock 平台，访问 http://127
 | EdgeOne 国内站 | SecretId + SecretKey | 国内站 CAM → API 密钥管理 | EdgeOne（teo）读写权限；站点需为 NS 接入模式才有 DNS 记录管理 |
 | EdgeOne 国际站 | SecretId + SecretKey | 国际站（edgeone.ai）账号的 API 密钥管理 | EdgeOne（teo）读写权限；站点需为 NS 接入模式 |
 | CloudFlare | API Token | Dashboard → My Profile → API Tokens → Create Token | 模板 "Edit zone DNS"，Zone Resources 限定到需要的域名 |
+| 火山引擎 | AccessKey ID + Secret Access Key | IAM 控制台 → 访问密钥（建议为 IAM 子用户创建） | 授予云解析 DNS（DNS）读写权限的策略 |
 
 > 建议：永远为 UniDNS 使用独立的子账号/Token，不要使用主账号全局密钥。
 
@@ -63,8 +71,8 @@ cargo run --example demo_server   # 内置内存 mock 平台，访问 http://127
 | --- | --- | --- | --- |
 | `listen` | `UNIDNS_LISTEN` | `0.0.0.0:18686` | HTTP 监听地址 |
 | `data_dir` | `UNIDNS_DATA_DIR` | `./data` | SQLite 与密钥文件目录 |
-| `sync_interval_minutes` | `UNIDNS_SYNC_INTERVAL` | `30` | 定时全量同步间隔（登录后可在界面调整） |
-| `admin_password` | `UNIDNS_ADMIN_PASSWORD` | 无 | 预置管理员口令（仅首次设置口令时生效） |
+| `sync_interval_minutes` | `UNIDNS_SYNC_INTERVAL` | `0` | 定时全量同步间隔（分钟）；`0` 停用，启用时至少 30（登录后可在界面调整） |
+| `admin_password` | `UNIDNS_ADMIN_PASSWORD` | 无 | 预置管理员口令（仅首次设置口令时生效；忘记口令用 `unidns reset-password` 重置） |
 | `master_key` | `UNIDNS_MASTER_KEY` | 自动生成 | 凭据加密主密钥（64 位 hex；缺省时生成 `data/secret.key`） |
 | — | `UNIDNS_CONFIG` | `config.toml` | 配置文件路径 |
 | — | `UNIDNS_LOG` | `info` | 日志级别（RUST_LOG 语法） |
@@ -82,41 +90,75 @@ UNIDNS_MASTER_KEY=<hex> ./unidns
 
 ## Docker 部署
 
-提供两份构建文件（除镜像源外完全一致）：`docker/Dockerfile`（官方源，供 CI/上线）与 `docker/CN.Dockerfile`（国内镜像源）。镜像为三阶段构建：前端 Astro 产物 → Rust musl 静态编译 → distroless/static 非 root 运行时（自带 ca-certificates，支持 amd64/arm64）。
+官方镜像发布在 GitHub Container Registry：`ghcr.io/jetsung/unidns:latest`（多架构 amd64/arm64），可直接拉取运行，无需本地构建。镜像为三阶段构建：前端 Astro 产物 → Rust musl 静态编译 → distroless/static 非 root 运行时（自带 ca-certificates）。
 
 ### docker compose（推荐）
 
-```bash
-# 数据目录权限（容器以 uid 65532 运行）
-mkdir -p data && chmod 0777 data
+在部署目录（如 `/opt/unidns`）新建 `compose.yaml`：
 
+```yaml
+services:
+  unidns:
+    image: ghcr.io/jetsung/unidns:latest
+    container_name: unidns
+    restart: unless-stopped
+    env_file:
+      - path: ./.env
+        required: false
+    ports:
+      - "18686:18686"
+    volumes:
+      - ./data:/app/data
+```
+
+同目录可选新建 `.env` 注入配置常量（容器内已默认监听 `0.0.0.0:18686`、数据目录 `/app/data`，无需设置 `UNIDNS_LISTEN` / `UNIDNS_DATA_DIR`）：
+
+```bash
+# 凭据加密主密钥（64 位 hex，建议固定；留空则首次启动自动生成 data/secret.key）
+UNIDNS_MASTER_KEY=
+# 预置管理员口令（仅首次设置口令时生效）
+UNIDNS_ADMIN_PASSWORD=
+# 定时全量同步间隔（分钟）；0 停用自动同步，启用时至少 30
+UNIDNS_SYNC_INTERVAL=0
+# 日志级别（RUST_LOG 语法）
+UNIDNS_LOG=info
+```
+
+```bash
+mkdir -p data && chown -R 65532:65532 ./data   # 容器以 uid 65532 运行，目录需归属该用户
+docker compose up -d
+docker compose logs -f
+```
+
+访问 `http://127.0.0.1:18686`，首次进入「设置管理员口令」引导。数据（SQLite 数据库与 `secret.key`）持久化在 `./data`（相对 `compose.yaml` 所在目录），备份该目录即可。
+
+> `env_file` 的 `path` / `required` 写法需要 Docker Compose v2.24+；旧版本可改为 `env_file: ./.env` 并确保文件存在。
+
+### docker build / docker run（源码构建）
+
+提供两份构建文件（除镜像源外完全一致）：`docker/Dockerfile`（官方源，供 CI/上线）与 `docker/CN.Dockerfile`（国内镜像源）。仓库内 `docker/compose.yaml` 使用本地构建的 `unidns:dev` 镜像：
+
+```bash
 cd docker
 docker compose up -d          # 首次自动构建 unidns:dev（默认走 CN.Dockerfile）
 docker compose logs -f
 ```
 
-访问 `http://127.0.0.1:8080`。配置全部通过环境变量注入（见上表），容器内无需 `config.toml`：
-
-```bash
-# 可选：固定凭据加密主密钥（建议写入 docker/.env；多机/重建容器场景必配）
-export UNIDNS_MASTER_KEY=$(openssl rand -hex 32)
-# 可选：预置管理员口令（仅首次设置口令时生效）
-export UNIDNS_ADMIN_PASSWORD=change-me
-```
-
-### docker build / docker run
+或直接构建运行：
 
 ```bash
 # 中国网络环境（国际/上线改用 docker/Dockerfile）
 docker build -f docker/CN.Dockerfile -t unidns:dev .
 
-docker run -d --name unidns -p 8080:8080 \
-  -v "$PWD/data:/data" \
+mkdir -p data && chown -R 65532:65532 ./data
+docker run -d --name unidns -p 18686:18686 \
+  -v "$PWD/data:/app/data" \
   -e UNIDNS_MASTER_KEY=<hex> \
+  --restart unless-stopped \
   unidns:dev
 ```
 
-数据（SQLite 数据库与 `secret.key`）持久化在挂载卷 `/data` 中；`UNIDNS_LISTEN` 已默认 `0.0.0.0:8080`。注意：本地 `data/` 与 `frontend/dist/` 已被 `.dockerignore` 排除，不会进镜像，前端产物始终在构建阶段内重新生成。
+数据（SQLite 数据库与 `secret.key`）持久化在挂载卷 `/app/data` 中。注意：本地 `data/` 与 `frontend/dist/` 已被 `.dockerignore` 排除，不会进镜像，前端产物始终在构建阶段内重新生成。
 
 ## REST API 概览
 
@@ -149,13 +191,15 @@ curl -X POST http://127.0.0.1:18686/api/v1/domains/1/records \
 
 ## 平台能力差异
 
-| 能力 | 阿里云 | DNSPod（国内/国际） | EdgeOne（国内/国际） | CloudFlare |
-| --- | --- | --- | --- | --- |
-| 域名/记录同步 | ✅ | ✅ | ✅ 站点（Zone） | ✅ |
-| 记录增删改 | ✅ | ✅ | ✅ | ✅ |
-| 记录启用/停用 | ✅ | ✅ | ✅ ModifyDnsRecordsStatus | ❌（平台 API 不支持，操作会返回明确提示） |
-| 解析线路 | ✅ Line | ✅ RecordLine | ✅ Location | — |
-| 代理状态 | — | — | —（代理在站点接入层） | ✅ proxied |
+| 能力 | 阿里云 | DNSPod（国内/国际） | EdgeOne（国内/国际） | CloudFlare | 火山引擎 |
+| --- | --- | --- | --- | --- | --- |
+| 域名/记录同步 | ✅ | ✅ | ✅ 站点（Zone） | ✅ | ✅ Zone |
+| 记录增删改 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 记录启用/停用 | ✅ | ✅ | ✅ ModifyDnsRecordsStatus | ❌（平台 API 不支持，操作会返回明确提示） | ✅ UpdateRecordStatus |
+| 解析线路 | ✅ Line | ✅ RecordLine | ✅ Location | — | ✅ Line（默认 `default`） |
+| 记录备注 | ✅ | ✅ | ❌ | ❌ | ✅（≤16 字符） |
+| 域名备注 | ✅ | ✅ | ❌ | ❌ | ✅ |
+| 代理状态 | — | — | —（代理在站点接入层） | ✅ proxied | — |
 
 ## 开发
 
@@ -185,9 +229,8 @@ pnpm build      # 产物输出到 frontend/dist，由 rust-embed 嵌入二进制
 UNIDNS_TEST_ALIYUN_AK_ID=... UNIDNS_TEST_ALIYUN_AK_SECRET=... cargo test aliyun_real -- --ignored
 UNIDNS_TEST_DNSPOD_SECRET_ID=... UNIDNS_TEST_DNSPOD_SECRET_KEY=... cargo test dnspod_real -- --ignored
 UNIDNS_TEST_CF_TOKEN=... cargo test cloudflare_real -- --ignored
+UNIDNS_TEST_VOLC_AK_ID=... UNIDNS_TEST_VOLC_AK_SECRET=... cargo test volcengine_real -- --ignored
 ```
-
-架构与规划文档见 [`openspec/`](openspec/) 目录（OpenSpec 变更与能力规格）。
 
 ## 安全说明
 

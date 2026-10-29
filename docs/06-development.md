@@ -24,6 +24,13 @@
 读取 `frontend/dist`，改完前端需先 `just frontend-build` 再编译后端，
 否则嵌入的是旧产物。
 
+品牌与 PWA 资源（`favicon.*`、`icon-*.png`、`manifest.webmanifest`、`sw.js`）
+放在 `frontend/public/`，由 Vite 原样复制到产物根路径。修改图标后需重新导出
+各尺寸 PNG/ICO（源文件为 `icon.svg`）。页面会注册 Service Worker（静态资源
+缓存优先），开发时若前端改动后仍加载旧资源，在 DevTools → Application →
+Service Workers 注销并清空 Cache Storage，或使用强制刷新；调试时可临时把
+`sw.js` 的缓存版本号 bump 一位。
+
 ## 提交前检查（prek）
 
 提交钩子见 `prek.toml`：pre-commit 阶段自动格式化（`cargo fmt --all`）+

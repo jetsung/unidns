@@ -14,8 +14,8 @@
 #   UNIDNS_SYNC_INTERVAL   定时全量同步间隔（分钟），0 为停用（默认）。可选。
 #
 # 数据落在仓库根的 data/（SQLite 数据库与 secret.key）。容器以 uid 65532 运行，
-# 目录需可写：
-#   mkdir -p data && chmod 0777 data
+# 目录需归属该用户：
+#   mkdir -p data && chown -R 65532:65532 ./data
 #
 # 本地（中国网络）构建默认走 CN.Dockerfile；国际/上线构建把下面
 # dockerfile 改为 docker/Dockerfile（官方源）。

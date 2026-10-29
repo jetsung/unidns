@@ -4,7 +4,7 @@ import AppLayout from '../../components/AppLayout.astro';
 
 <AppLayout title="解析记录" active="domains">
   <script>
-    import { api, esc, toast, modal, modalFrame, requireAuth, PROVIDERS, RECORD_TYPES, busy, pollRun, pager, bindPager } from '../../lib/app.js';
+    import { api, esc, toast, modal, modalFrame, requireAuth, PROVIDERS, RECORD_TYPES, busy, pollRun, pager, bindPager, copyText } from '../../lib/app.js';
 
     // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
     document.addEventListener('astro:page-load', () => {
@@ -42,15 +42,19 @@ import AppLayout from '../../components/AppLayout.astro';
 
     function recordRow(r) {
       const isCf = domain.provider_type === 'cloudflare';
+      const isEdgeone = domain.provider_type === 'edgeone' || domain.provider_type === 'edgeone_intl';
       const proxied = r.proxied != null ? (r.proxied ? ' <span class="badge provider" title="CloudFlare 代理已开启">代理中</span>' : '') : '';
       const pending = r.pending_sync ? ' <span class="badge err" title="平台侧状态与本地不一致，下次同步将自动对齐">待同步</span>' : '';
+      const platformCols = isEdgeone
+        ? `<td class="muted" data-label="权重">${r.weight != null ? r.weight : '—'}</td><td class="muted" data-label="优先级">${r.priority != null ? r.priority : '—'}</td>`
+        : `<td class="muted" data-label="线路">${r.line ? esc(r.line) : '—'}</td>`;
       return `
         <tr>
-          <td class="mono" data-label="主机记录"><b>${esc(r.host)}</b></td>
+          <td class="mono" data-label="主机记录">${esc(r.host)}<button class="copy-btn" data-copy="${esc(r.host === '@' ? domain.name : r.host + '.' + domain.name)}" title="复制完整记录名" aria-label="复制完整记录名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></td>
           <td data-label="类型"><span class="badge">${esc(r.rtype)}</span></td>
           <td class="mono break-all" data-label="记录值">${esc(r.value)}${proxied}${r.remark ? `<div class="sub">📝 ${esc(r.remark)}</div>` : ''}</td>
           <td class="mono" data-label="TTL">${r.ttl}</td>
-          <td class="muted" data-label="线路">${r.line ? esc(r.line) : '—'}</td>
+          ${platformCols}
           <td data-label="状态">${r.status === 'enabled' ? '<span class="badge ok"><span class="dot"></span>启用</span>' : '<span class="badge warn"><span class="dot"></span>停用</span>'}${pending}</td>
           <td class="actions" style="text-align:right">
             <button class="btn small" data-ract="edit" data-rid="${r.id}">编辑</button>
@@ -62,6 +66,7 @@ import AppLayout from '../../components/AppLayout.astro';
 
     function render(data) {
       const isCf = domain.provider_type === 'cloudflare';
+      const isEdgeone = domain.provider_type === 'edgeone' || domain.provider_type === 'edgeone_intl';
       app.innerHTML = `
         <div class="breadcrumb"><a href="/domains">域名</a><span>/</span><span>${esc(domain.name)}</span></div>
         <div class="page-head">
@@ -97,14 +102,14 @@ import AppLayout from '../../components/AppLayout.astro';
           <div class="empty"><div class="icon">📄</div><div class="title">没有匹配的解析记录</div><div>点击「添加记录」创建，或调整筛选条件</div></div>
           ` : `
           <table>
-            <thead><tr><th>主机记录</th><th>类型</th><th>记录值</th><th>TTL</th><th>线路</th><th>状态</th><th style="text-align:right">操作</th></tr></thead>
+            <thead><tr><th>主机记录</th><th>类型</th><th>记录值</th><th>TTL</th>${isEdgeone ? '<th>权重</th><th>优先级</th>' : '<th>线路</th>'}<th>状态</th><th style="text-align:right">操作</th></tr></thead>
             <tbody>
               ${data.items.map(recordRow).join('')}
             </tbody>
           </table>`}
         </div>
         ${pager({ total: data.total, page: data.page, page_size: data.page_size })}
-        ${isCf ? '' : `<div class="sub" style="margin-top:10px">解析线路留空为平台默认线路</div>`}`;
+        ${isEdgeone ? `<div class="sub" style="margin-top:10px">权重仅适用于 A/AAAA/CNAME，同一主机记录的记录需统一设置权重；优先级仅适用于 MX</div>` : (isCf ? '' : `<div class="sub" style="margin-top:10px">解析线路留空为平台默认线路</div>`)}`;
 
       bindPager(
         (p) => { filter.page = p; load().catch((err) => toast(err.message, 'err')); },
@@ -143,6 +148,9 @@ import AppLayout from '../../components/AppLayout.astro';
           } catch (err) { toast(err.message, 'err'); }
         });
       });
+      document.querySelectorAll('[data-copy]').forEach((el) => {
+        el.addEventListener('click', () => copyText(el.dataset.copy));
+      });
       app.querySelectorAll('button[data-ract]').forEach((btn) => {
         btn.addEventListener('click', () => recordAction(btn.dataset.ract, btn.dataset.rid, btn.dataset.host, btn.dataset.target));
       });
@@ -152,6 +160,7 @@ import AppLayout from '../../components/AppLayout.astro';
       const isEdit = !!existing;
       const f = isEdit ? existing : { host: '', rtype: 'A', value: '', ttl: 600, line: '', proxied: false };
       const isCf = domain.provider_type === 'cloudflare';
+      const isEdgeone = domain.provider_type === 'edgeone' || domain.provider_type === 'edgeone_intl';
       const mask = modalFrame(isEdit ? `编辑记录 · ${esc(f.host)}` : '添加解析记录', `
         <div class="field">
           <label>主机记录</label>
@@ -177,6 +186,16 @@ import AppLayout from '../../components/AppLayout.astro';
         ${isCf
           ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-secondary)">
                <input type="checkbox" name="proxied" style="height:auto;width:auto" ${f.proxied ? 'checked' : ''} /> 开启 CloudFlare 代理（proxied）</label>`
+          : isEdgeone
+          ? `<div class="field" data-wp="weight" style="display:none">
+               <label>权重</label>
+               <input type="number" name="weight" min="-1" max="100" value="${f.weight ?? ''}" placeholder="留空为平台默认（-1）" />
+             </div>
+             <div class="field" data-wp="priority" style="display:none">
+               <label>优先级</label>
+               <input type="number" name="priority" min="0" max="50" value="${f.priority ?? ''}" placeholder="留空为平台默认（0）" />
+             </div>
+             <div class="hint">权重仅适用于 A/AAAA/CNAME，同一主机记录的记录需统一设置权重；优先级仅适用于 MX</div>`
           : `<div class="field"><label>解析线路</label><input name="line" value="${esc(f.line || '')}" placeholder="留空为默认线路" /></div>`}
         ${domain.provider_type !== 'edgeone' && domain.provider_type !== 'edgeone_intl'
           ? `<div class="field"><label>备注</label><input name="remark" value="${esc(f.remark || '')}" placeholder="选填；清空并保存可删除备注" /></div>`
@@ -185,6 +204,15 @@ import AppLayout from '../../components/AppLayout.astro';
         <button class="btn" data-close>取消</button>
         <button class="btn primary" id="save-record">${isEdit ? '保存修改' : '创建并回写平台'}</button>
       `);
+      if (isEdgeone) {
+        const syncWpFields = () => {
+          const t = mask.querySelector('[name="rtype"]').value;
+          mask.querySelector('[data-wp="weight"]').style.display = ['A', 'AAAA', 'CNAME'].includes(t) ? '' : 'none';
+          mask.querySelector('[data-wp="priority"]').style.display = t === 'MX' ? '' : 'none';
+        };
+        mask.querySelector('[name="rtype"]').addEventListener('change', syncWpFields);
+        syncWpFields();
+      }
       mask.querySelector('#save-record').addEventListener('click', async (e) => {
         await busy(e.target, async () => {
           const body = {
@@ -194,7 +222,14 @@ import AppLayout from '../../components/AppLayout.astro';
             ttl: Number(mask.querySelector('[name="ttl"]').value),
           };
           if (isCf) body.proxied = mask.querySelector('[name="proxied"]').checked;
-          else {
+          else if (isEdgeone) {
+            const showWeight = ['A', 'AAAA', 'CNAME'].includes(body.rtype);
+            const showPriority = body.rtype === 'MX';
+            const w = mask.querySelector('[name="weight"]').value.trim();
+            const p = mask.querySelector('[name="priority"]').value.trim();
+            if (showWeight) body.weight = isEdit ? (w === '' ? -1 : Number(w)) : (w === '' ? undefined : Number(w));
+            if (showPriority) body.priority = isEdit ? (p === '' ? 0 : Number(p)) : (p === '' ? undefined : Number(p));
+          } else {
             const line = mask.querySelector('[name="line"]').value.trim();
             if (line) body.line = line;
           }

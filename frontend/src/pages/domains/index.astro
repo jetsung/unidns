@@ -4,7 +4,7 @@ import AppLayout from '../../components/AppLayout.astro';
 
 <AppLayout title="域名" active="domains">
   <script>
-    import { api, esc, fmtTime, toast, requireAuth, zoneStatusBadge, modalFrame, busy, pager, bindPager } from '../../lib/app.js';
+    import { api, esc, fmtTime, toast, requireAuth, zoneStatusBadge, modalFrame, busy, pager, bindPager, copyText } from '../../lib/app.js';
 
     // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
     document.addEventListener('astro:page-load', () => {
@@ -19,6 +19,7 @@ import AppLayout from '../../components/AppLayout.astro';
       edgeone: 'EdgeOne（国内站）',
       edgeone_intl: 'EdgeOne（国际站）',
       cloudflare: 'CloudFlare',
+      volcengine: '火山引擎',
     };
 
     let app;
@@ -61,7 +62,7 @@ import AppLayout from '../../components/AppLayout.astro';
       }
       const rows = sorted.map((d) => `
                 <tr>
-                  <td><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a></td>
+                  <td><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a><button class="copy-btn" data-copy="${esc(d.name)}" title="复制域名" aria-label="复制域名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></td>
                   <td><span class="badge provider">${esc(PROVIDER_LABELS[d.provider_type] || d.provider_type)}</span></td>
                   <td>${esc(d.account_name)}</td>
                   <td>${d.record_count}</td>
@@ -122,6 +123,9 @@ import AppLayout from '../../components/AppLayout.astro';
           else state.sort = { key: null, dir: 1 };
           render();
         });
+      });
+      document.querySelectorAll('[data-copy]').forEach((el) => {
+        el.addEventListener('click', () => copyText(el.dataset.copy));
       });
       document.querySelectorAll('a[data-remark]').forEach((el) => {
         el.addEventListener('click', (e) => {

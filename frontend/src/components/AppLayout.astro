@@ -17,6 +17,9 @@ const current = Astro.url.pathname;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>{title} · UniDNS</title>
     <ClientRouter />
   </head>
@@ -38,6 +41,7 @@ const current = Astro.url.pathname;
         <div class="side-footer">
           <button class="btn ghost small" id="logout-btn" style="color:#9ca3af">登出</button>
         </div>
+        <div class="side-copy">© 2026 UniDNS · <a href="https://github.com/jetsung/unidns" target="_blank" rel="noopener noreferrer">GitHub</a></div>
         <button class="sidebar-toggle" id="sidebar-toggle" title="折叠/展开侧边栏">
           <svg class="ico-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
           <svg class="ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>

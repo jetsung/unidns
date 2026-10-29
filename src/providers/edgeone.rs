@@ -195,6 +195,42 @@ fn parse_zone(v: &Value) -> Option<ProviderDomain> {
     })
 }
 
+/// EdgeOne 默认权重归一：-1 视为未设置。
+fn normalize_weight(weight: Option<i64>) -> Option<i64> {
+    match weight {
+        Some(-1) => None,
+        other => other,
+    }
+}
+
+/// EdgeOne 默认优先级归一：0 视为未设置。
+fn normalize_priority(priority: Option<i64>) -> Option<i64> {
+    match priority {
+        Some(0) => None,
+        other => other,
+    }
+}
+
+/// 按 EdgeOne 平台规则附加 Weight/Priority：不下发 Location；
+/// weight 仅对 A/AAAA/CNAME 下发，priority 仅对 MX 下发（非 None 才下发）。
+fn apply_weight_priority(
+    payload: &mut serde_json::Map<String, Value>,
+    rtype: &str,
+    weight: Option<i64>,
+    priority: Option<i64>,
+) {
+    if matches!(rtype, "A" | "AAAA" | "CNAME")
+        && let Some(w) = weight
+    {
+        payload.insert("Weight".into(), w.into());
+    }
+    if rtype.eq_ignore_ascii_case("MX")
+        && let Some(p) = priority
+    {
+        payload.insert("Priority".into(), p.into());
+    }
+}
+
 fn parse_record(v: &Value, zone_name: &str) -> Option<ProviderRecord> {
     Some(ProviderRecord {
         provider_record_id: v.get("RecordId")?.as_str()?.to_string(),
@@ -202,11 +238,8 @@ fn parse_record(v: &Value, zone_name: &str) -> Option<ProviderRecord> {
         rtype: v.get("Type")?.as_str()?.to_string(),
         value: v.get("Content")?.as_str()?.to_string(),
         ttl: v.get("TTL").and_then(|t| t.as_i64()).unwrap_or(300) as u64,
-        line: v
-            .get("Location")
-            .and_then(|l| l.as_str())
-            .filter(|l| !l.is_empty())
-            .map(String::from),
+        // EdgeOne 的解析线路不纳入统一视图
+        line: None,
         // EdgeOne 的加速代理在站点接入层，DNS 记录无 proxied 概念
         proxied: None,
         // EdgeOne 无解析记录备注
@@ -216,6 +249,8 @@ fn parse_record(v: &Value, zone_name: &str) -> Option<ProviderRecord> {
             .and_then(|s| s.as_str())
             .map(|s| s.eq_ignore_ascii_case("enable"))
             .unwrap_or(true),
+        weight: normalize_weight(v.get("Weight").and_then(|w| w.as_i64())),
+        priority: normalize_priority(v.get("Priority").and_then(|p| p.as_i64())),
     })
 }
 
@@ -288,14 +323,19 @@ impl DnsProvider for EdgeoneProvider {
         zone: &ProviderZone,
         input: &RecordInput,
     ) -> Result<ProviderRecord, ProviderError> {
-        let payload = json!({
+        let mut payload = json!({
             "ZoneId": zone.provider_domain_id,
             "Name": super::host_to_fqdn(&input.host, &zone.name),
             "Type": input.rtype,
             "Content": input.value,
             "TTL": input.ttl,
-            "Location": input.line.clone().unwrap_or_else(|| "default".into()),
         });
+        apply_weight_priority(
+            payload.as_object_mut().expect("payload 为对象"),
+            &input.rtype,
+            input.weight,
+            input.priority,
+        );
         let body = self.call("CreateDnsRecord", payload).await?;
         let record_id = body
             .get("RecordId")
@@ -311,11 +351,14 @@ impl DnsProvider for EdgeoneProvider {
             rtype: input.rtype.clone(),
             value: input.value.clone(),
             ttl: input.ttl,
-            line: Some(input.line.clone().unwrap_or_else(|| "default".into())),
+            // EdgeOne 的解析线路不纳入统一视图
+            line: None,
             proxied: None,
-            enabled: true,
             // EdgeOne 无备注概念
             remark: None,
+            enabled: true,
+            weight: normalize_weight(input.weight),
+            priority: normalize_priority(input.priority),
         })
     }
 
@@ -324,19 +367,30 @@ impl DnsProvider for EdgeoneProvider {
         zone: &ProviderZone,
         record: &ProviderRecord,
     ) -> Result<ProviderRecord, ProviderError> {
+        let mut item = json!({
+            "RecordId": record.provider_record_id,
+            "Name": super::host_to_fqdn(&record.host, &zone.name),
+            "Type": record.rtype,
+            "Content": record.value,
+            "TTL": record.ttl,
+        });
+        apply_weight_priority(
+            item.as_object_mut().expect("item 为对象"),
+            &record.rtype,
+            record.weight,
+            record.priority,
+        );
         let payload = json!({
             "ZoneId": zone.provider_domain_id,
-            "DnsRecords": [{
-                "RecordId": record.provider_record_id,
-                "Name": super::host_to_fqdn(&record.host, &zone.name),
-                "Type": record.rtype,
-                "Content": record.value,
-                "TTL": record.ttl,
-                "Location": record.line.clone().unwrap_or_else(|| "default".into()),
-            }],
+            "DnsRecords": [item],
         });
         self.call("ModifyDnsRecords", payload).await?;
-        Ok(record.clone())
+        Ok(ProviderRecord {
+            line: None,
+            weight: normalize_weight(record.weight),
+            priority: normalize_priority(record.priority),
+            ..record.clone()
+        })
     }
 
     async fn delete_record(
@@ -438,7 +492,8 @@ mod tests {
         let r = parse_record(&v, "example.com").unwrap();
         assert_eq!(r.provider_record_id, "record-3277epj0rm2y");
         assert_eq!(r.host, "www");
-        assert_eq!(r.line.as_deref(), Some("Default"));
+        // EdgeOne 不再读取 Location 作为线路字段
+        assert_eq!(r.line, None);
         assert!(r.enabled);
         assert_eq!(r.proxied, None);
 
@@ -453,6 +508,134 @@ mod tests {
         let r = parse_record(&root, "example.com").unwrap();
         assert_eq!(r.host, "@");
         assert!(!r.enabled);
+    }
+
+    #[test]
+    fn parse_record_reads_weight_and_priority() {
+        let v = serde_json::json!({
+            "RecordId": "rec-mx",
+            "Name": "example.com",
+            "Type": "MX",
+            "Content": "mx1.example.com",
+            "TTL": 300,
+            "Priority": 10,
+            "Weight": 40,
+            "Location": "Default",
+            "Status": "enable"
+        });
+        let r = parse_record(&v, "example.com").unwrap();
+        assert_eq!(r.weight, Some(40));
+        assert_eq!(r.priority, Some(10));
+        assert_eq!(r.line, None);
+    }
+
+    #[test]
+    fn weight_priority_normalization() {
+        assert_eq!(normalize_weight(Some(-1)), None);
+        assert_eq!(normalize_weight(Some(40)), Some(40));
+        assert_eq!(normalize_priority(Some(0)), None);
+        assert_eq!(normalize_priority(Some(10)), Some(10));
+
+        let v = serde_json::json!({
+            "RecordId": "rec-def",
+            "Name": "example.com",
+            "Type": "A",
+            "Content": "1.1.1.1",
+            "TTL": 300,
+            "Weight": -1,
+            "Priority": 0,
+            "Status": "enable"
+        });
+        let r = parse_record(&v, "example.com").unwrap();
+        assert_eq!(r.weight, None);
+        assert_eq!(r.priority, None);
+    }
+
+    #[test]
+    fn create_payload_includes_weight_conditionally() {
+        let zone = || ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: "zone-1".into(),
+        };
+        let input = |rtype: &str, weight: Option<i64>, priority: Option<i64>| RecordInput {
+            host: "@".into(),
+            rtype: rtype.into(),
+            value: "1.1.1.1".into(),
+            ttl: 300,
+            line: None,
+            proxied: None,
+            remark: None,
+            weight,
+            priority,
+        };
+
+        // A 记录带权重：下发 Weight，不下发 Location / Priority
+        let mut payload = json!({
+            "ZoneId": "zone-1",
+            "Name": "example.com",
+            "Type": "A",
+            "Content": "1.1.1.1",
+            "TTL": 300,
+        });
+        let i = input("A", Some(40), Some(5));
+        apply_weight_priority(
+            payload.as_object_mut().unwrap(),
+            &i.rtype,
+            i.weight,
+            i.priority,
+        );
+        assert!(!payload.as_object().unwrap().contains_key("Location"));
+        assert_eq!(payload["Weight"], 40);
+        assert!(!payload.as_object().unwrap().contains_key("Priority"));
+
+        // TXT 记录：不下发权重
+        let mut payload = json!({"Type": "TXT"});
+        let i = input("TXT", Some(40), None);
+        apply_weight_priority(
+            payload.as_object_mut().unwrap(),
+            &i.rtype,
+            i.weight,
+            i.priority,
+        );
+        assert!(!payload.as_object().unwrap().contains_key("Weight"));
+
+        // MX 记录：下发 Priority，不下发 Weight
+        let mut payload = json!({"Type": "MX"});
+        let i = input("MX", None, Some(10));
+        apply_weight_priority(
+            payload.as_object_mut().unwrap(),
+            &i.rtype,
+            i.weight,
+            i.priority,
+        );
+        assert_eq!(payload["Priority"], 10);
+        assert!(!payload.as_object().unwrap().contains_key("Weight"));
+
+        // 留空（None）表示使用平台默认，不下发
+        let mut payload = json!({"Type": "A"});
+        let i = input("A", None, None);
+        apply_weight_priority(
+            payload.as_object_mut().unwrap(),
+            &i.rtype,
+            i.weight,
+            i.priority,
+        );
+        assert!(!payload.as_object().unwrap().contains_key("Weight"));
+        assert!(!payload.as_object().unwrap().contains_key("Priority"));
+
+        // 显式清空：下发平台默认值 -1 / 0
+        let mut payload = json!({"Type": "A"});
+        let i = input("A", Some(-1), None);
+        apply_weight_priority(
+            payload.as_object_mut().unwrap(),
+            &i.rtype,
+            i.weight,
+            i.priority,
+        );
+        assert_eq!(payload["Weight"], -1);
+
+        // 抑制未使用告警
+        let _ = zone();
     }
 
     #[test]
@@ -471,5 +654,125 @@ mod tests {
         ));
         let other = serde_json::json!({"Code": "FailedOperation", "Message": "x"});
         assert!(matches!(map_error(&other), ProviderError::Api { .. }));
+    }
+
+    /// 通过本地假 EdgeOne API 全链路验证：提交默认值 -1/0 时，
+    /// payload 照常下发，适配器返回值归一为空（line 恒空）。
+    #[tokio::test]
+    async fn clear_weight_priority_via_api_is_normalized() {
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let seen: Arc<StdMutex<Vec<Value>>> = Arc::new(StdMutex::new(Vec::new()));
+        let seen_for_handler = seen.clone();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::post(
+                move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+                    let seen = seen_for_handler.clone();
+                    async move {
+                        let payload: Value = serde_json::from_slice(&body).unwrap();
+                        seen.lock().unwrap().push(payload);
+                        let action = headers
+                            .get("x-tc-action")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        let resp = match action.as_str() {
+                            "creatednsrecord" => json!({"Response": {"RecordId": "rec-1"}}),
+                            _ => json!({"Response": {}}),
+                        };
+                        axum::Json(resp)
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let provider = EdgeoneProvider::new(
+            EdgeoneCredentials {
+                secret_id: "id".into(),
+                secret_key: "key".into(),
+            },
+            TeoSite::China,
+        )
+        .with_endpoint(format!("http://{addr}"));
+        let zone = ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: "zone-1".into(),
+        };
+
+        // 创建 A 记录：清空权重（-1）时下发 -1，返回值归一为空，线路为空
+        let input = RecordInput {
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.1.1.1".into(),
+            ttl: 300,
+            line: None,
+            proxied: None,
+            remark: None,
+            weight: Some(-1),
+            priority: None,
+        };
+        let created = provider.create_record(&zone, &input).await.unwrap();
+        assert_eq!(created.weight, None);
+        assert_eq!(created.priority, None);
+        assert_eq!(created.line, None);
+
+        // 创建 MX 记录：清空优先级（0）时下发 0，返回值归一为空
+        let input = RecordInput {
+            rtype: "MX".into(),
+            value: "mx1.example.com".into(),
+            weight: None,
+            priority: Some(0),
+            ..input
+        };
+        let created = provider.create_record(&zone, &input).await.unwrap();
+        assert_eq!(created.weight, None);
+        assert_eq!(created.priority, None);
+
+        // 修改记录：返回值同样归一
+        let record = ProviderRecord {
+            provider_record_id: "rec-1".into(),
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.1.1.1".into(),
+            ttl: 300,
+            line: Some("default".into()),
+            proxied: None,
+            enabled: true,
+            remark: None,
+            weight: Some(-1),
+            priority: None,
+        };
+        let updated = provider.update_record(&zone, &record).await.unwrap();
+        assert_eq!(updated.weight, None);
+        assert_eq!(updated.line, None);
+
+        // 断言下发的 payload：不含 Location，含 Weight=-1 / Priority=0
+        let payloads = seen.lock().unwrap();
+        let create_a = payloads
+            .iter()
+            .find(|p| p.get("DnsRecords").is_none() && p["Type"] == "A")
+            .unwrap();
+        assert!(!create_a.as_object().unwrap().contains_key("Location"));
+        assert_eq!(create_a["Weight"], -1);
+        assert!(!create_a.as_object().unwrap().contains_key("Priority"));
+        let create_mx = payloads
+            .iter()
+            .find(|p| p.get("DnsRecords").is_none() && p["Type"] == "MX")
+            .unwrap();
+        assert_eq!(create_mx["Priority"], 0);
+        assert!(!create_mx.as_object().unwrap().contains_key("Weight"));
+        let modify = payloads
+            .iter()
+            .find(|p| p.get("DnsRecords").is_some())
+            .unwrap();
+        let item = &modify["DnsRecords"][0];
+        assert!(!item.as_object().unwrap().contains_key("Location"));
+        assert_eq!(item["Weight"], -1);
     }
 }

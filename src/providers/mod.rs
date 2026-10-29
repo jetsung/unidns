@@ -7,6 +7,7 @@ pub mod dnspod;
 pub mod edgeone;
 #[cfg(test)]
 pub mod mock;
+pub mod volcengine;
 
 /// 平台错误的统一归一化：上层据此映射 HTTP 状态与可读信息、决定重试策略。
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +45,7 @@ pub enum ProviderType {
     Edgeone,
     EdgeoneIntl,
     Cloudflare,
+    Volcengine,
 }
 
 impl ProviderType {
@@ -55,6 +57,7 @@ impl ProviderType {
             ProviderType::Edgeone => "edgeone",
             ProviderType::EdgeoneIntl => "edgeone_intl",
             ProviderType::Cloudflare => "cloudflare",
+            ProviderType::Volcengine => "volcengine",
         }
     }
 
@@ -66,6 +69,7 @@ impl ProviderType {
             ProviderType::Edgeone => "EdgeOne（国内站）",
             ProviderType::EdgeoneIntl => "EdgeOne（国际站）",
             ProviderType::Cloudflare => "CloudFlare",
+            ProviderType::Volcengine => "火山引擎",
         }
     }
 
@@ -75,6 +79,7 @@ impl ProviderType {
             ProviderType::Dnspod | ProviderType::DnspodIntl => &["secret_id", "secret_key"],
             ProviderType::Edgeone | ProviderType::EdgeoneIntl => &["secret_id", "secret_key"],
             ProviderType::Cloudflare => &["api_token"],
+            ProviderType::Volcengine => &["access_key_id", "access_key_secret"],
         }
     }
 }
@@ -119,6 +124,10 @@ pub struct ProviderRecord {
     pub enabled: bool,
     /// 备注（阿里云 / DNSPod / CloudFlare 支持；EdgeOne 无）。
     pub remark: Option<String>,
+    /// 权重（EdgeOne 适用，-1~100，-1 表示未设置）；其他平台为 None。
+    pub weight: Option<i64>,
+    /// 优先级（EdgeOne MX 记录适用，0~50，0 表示未设置）；其他平台为 None。
+    pub priority: Option<i64>,
 }
 
 /// 创建/修改记录的入参。
@@ -132,6 +141,8 @@ pub struct RecordInput {
     pub line: Option<String>,
     pub proxied: Option<bool>,
     pub remark: Option<String>,
+    pub weight: Option<i64>,
+    pub priority: Option<i64>,
 }
 
 fn default_ttl() -> u64 {
@@ -285,6 +296,15 @@ pub fn build_provider(
             }
             Ok(Box::new(p))
         }
+        ProviderType::Volcengine => {
+            let cred: volcengine::VolcengineCredentials =
+                serde_json::from_str(credentials_json).map_err(|e| bad("火山引擎", e))?;
+            let mut p = volcengine::VolcengineProvider::new(cred);
+            if let Some(ep) = endpoint_override {
+                p = p.with_endpoint(ep);
+            }
+            Ok(Box::new(p))
+        }
     }
 }
 
@@ -293,6 +313,7 @@ pub fn build_provider(
 /// - 阿里云:   UNIDNS_TEST_ALIYUN_AK_ID / UNIDNS_TEST_ALIYUN_AK_SECRET
 /// - 腾讯云:   UNIDNS_TEST_DNSPOD_SECRET_ID / UNIDNS_TEST_DNSPOD_SECRET_KEY
 /// - CloudFlare: UNIDNS_TEST_CF_TOKEN
+/// - 火山引擎: UNIDNS_TEST_VOLC_AK_ID / UNIDNS_TEST_VOLC_AK_SECRET
 #[cfg(test)]
 mod real_credential_tests {
     use super::*;
@@ -348,6 +369,34 @@ mod real_credential_tests {
         provider.verify().await.expect("CloudFlare 连通性验证失败");
     }
 
+    #[tokio::test]
+    #[ignore = "需要真实凭据（UNIDNS_TEST_VOLC_AK_ID / UNIDNS_TEST_VOLC_AK_SECRET）"]
+    async fn volcengine_real_verify() {
+        let (Some(id), Some(secret)) = (
+            opt("UNIDNS_TEST_VOLC_AK_ID"),
+            opt("UNIDNS_TEST_VOLC_AK_SECRET"),
+        ) else {
+            eprintln!("未提供火山引擎测试凭据，跳过");
+            return;
+        };
+        let cred = serde_json::json!({"access_key_id": id, "access_key_secret": secret});
+        let provider = build_provider(ProviderType::Volcengine, &cred.to_string(), None).unwrap();
+        provider.verify().await.expect("火山引擎连通性验证失败");
+        let domains = provider.list_domains().await.expect("火山引擎拉取域名失败");
+        eprintln!("火山引擎账户下共 {} 个域名", domains.len());
+        if let Some(d) = domains.first() {
+            let zone = ProviderZone {
+                name: d.name.clone(),
+                provider_domain_id: d.provider_domain_id.clone(),
+            };
+            let records = provider
+                .list_records(&zone)
+                .await
+                .expect("火山引擎拉取解析记录失败");
+            eprintln!("域名 {} 共 {} 条解析记录", d.name, records.len());
+        }
+    }
+
     /// 任务 9.2 端到端冒烟：对每个已提供凭据的平台执行
     /// 验证 → 拉取域名 → 创建 TXT 测试记录 → 修改 → 停用/启用 → 删除。
     /// 测试记录主机名为 _unidns-smoke-<时间戳>，删除后平台侧不残留。
@@ -385,6 +434,16 @@ mod real_credential_tests {
                     "CloudFlare",
                     ProviderType::Cloudflare,
                     serde_json::json!({"api_token": token}),
+                ));
+            }
+            if let (Some(id), Some(secret)) = (
+                opt("UNIDNS_TEST_VOLC_AK_ID"),
+                opt("UNIDNS_TEST_VOLC_AK_SECRET"),
+            ) {
+                v.push((
+                    "火山引擎",
+                    ProviderType::Volcengine,
+                    serde_json::json!({"access_key_id": id, "access_key_secret": secret}),
                 ));
             }
             v
@@ -425,6 +484,8 @@ mod real_credential_tests {
                 line: None,
                 proxied: None,
                 remark: None,
+                weight: None,
+                priority: None,
             };
             let created = provider
                 .create_record(&zone, &input)
@@ -439,6 +500,28 @@ mod real_credential_tests {
                 .await
                 .unwrap_or_else(|e| panic!("[{name}] 修改测试记录失败: {e}"));
             eprintln!("[{name}] 修改成功");
+
+            // 记录备注回写（支持的平台执行，不支持则跳过）
+            match provider
+                .set_record_remark(&zone, &created.provider_record_id, "unidns-smoke")
+                .await
+            {
+                Ok(_) => eprintln!("[{name}] 记录备注设置成功"),
+                Err(ProviderError::Unsupported(m)) => {
+                    eprintln!("[{name}] 平台不支持记录备注，跳过（{m}）")
+                }
+                Err(e) => panic!("[{name}] 设置记录备注失败: {e}"),
+            }
+            match provider
+                .set_domain_remark(&domain.name, "unidns-smoke")
+                .await
+            {
+                Ok(_) => eprintln!("[{name}] 域名备注设置成功"),
+                Err(ProviderError::Unsupported(m)) => {
+                    eprintln!("[{name}] 平台不支持域名备注，跳过（{m}）")
+                }
+                Err(e) => panic!("[{name}] 设置域名备注失败: {e}"),
+            }
 
             match provider
                 .set_record_status(&zone, &created.provider_record_id, false)

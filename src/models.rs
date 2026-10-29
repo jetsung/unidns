@@ -25,6 +25,7 @@ impl AccountRow {
             "edgeone" => Some(ProviderType::Edgeone),
             "edgeone_intl" => Some(ProviderType::EdgeoneIntl),
             "cloudflare" => Some(ProviderType::Cloudflare),
+            "volcengine" => Some(ProviderType::Volcengine),
             _ => None,
         }
     }
@@ -63,6 +64,8 @@ pub struct RecordRow {
     pub pending_sync: i64,
     pub remark: String,
     pub synced_at: String,
+    pub weight: Option<i64>,
+    pub priority: Option<i64>,
 }
 
 impl RecordRow {

@@ -54,6 +54,8 @@ impl MockState {
                 proxied: None,
                 enabled: true,
                 remark: None,
+                weight: None,
+                priority: None,
             },
             ProviderRecord {
                 provider_record_id: format!("rec-{zone}-2"),
@@ -65,6 +67,8 @@ impl MockState {
                 proxied: None,
                 enabled: true,
                 remark: Some("演示备注".into()),
+                weight: None,
+                priority: None,
             },
         ];
         self.records.insert(zone.into(), records);
@@ -150,6 +154,8 @@ impl DnsProvider for MockProvider {
             proxied: input.proxied,
             enabled: true,
             remark: input.remark.clone(),
+            weight: input.weight,
+            priority: input.priority,
         };
         guard
             .records

@@ -594,4 +594,68 @@ mod tests {
         assert_eq!(state.domains.len(), 1);
         assert_eq!(state.records["example.com"].len(), 2);
     }
+
+    /// 火山引擎账户：添加成功、缺 access_key_secret 被拒、未知 provider_type 仍被拒。
+    #[tokio::test]
+    async fn create_volcengine_account() {
+        let (state, _mock) = test_app_with_mock().await;
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+
+        // 1) 添加 volcengine 账户成功
+        let ok = r#"{"name":"火山账户","provider_type":"volcengine","credentials":{"access_key_id":"AKLTvolc123456","access_key_secret":"volc-secret-987654"}}"#;
+        let res = req(&app, "POST", "/api/v1/accounts", Some(ok), Some(&cookie)).await;
+        assert_eq!(res.status(), 201);
+        let id = body_json(res).await["id"].as_i64().unwrap();
+        // 列表展示火山引擎徽章所需字段
+        let res = req(&app, "GET", "/api/v1/accounts", None, Some(&cookie)).await;
+        let items = body_json(res).await["items"].as_array().unwrap().clone();
+        assert_eq!(items[0]["provider_type"], "volcengine");
+        assert_eq!(items[0]["provider_name"], "火山引擎");
+        assert!(
+            !items[0].to_string().contains("volc-secret-987654"),
+            "凭据明文泄漏"
+        );
+
+        // 2) 缺 access_key_secret → 400 且指出字段
+        let missing = r#"{"name":"缺密钥","provider_type":"volcengine","credentials":{"access_key_id":"only-ak"}}"#;
+        let res = req(
+            &app,
+            "POST",
+            "/api/v1/accounts",
+            Some(missing),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 400);
+        assert!(
+            body_json(res).await["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("access_key_secret")
+        );
+
+        // 3) 未知 provider_type 仍被拒
+        let unknown = r#"{"name":"x","provider_type":"hetzner","credentials":{}}"#;
+        let res = req(
+            &app,
+            "POST",
+            "/api/v1/accounts",
+            Some(unknown),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 400);
+
+        // 4) 账户入库后 provider_type 可被解析（迁移后 CHECK 约束放行 volcengine）
+        let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE id = ?")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            row.provider_type(),
+            Some(crate::providers::ProviderType::Volcengine)
+        );
+    }
 }

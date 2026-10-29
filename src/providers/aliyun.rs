@@ -209,6 +209,8 @@ fn parse_record(v: &Value) -> Option<ProviderRecord> {
             .and_then(|r| r.as_str())
             .filter(|r| !r.is_empty())
             .map(String::from),
+        weight: None,
+        priority: None,
     })
 }
 
@@ -324,6 +326,8 @@ impl DnsProvider for AliyunProvider {
             proxied: None,
             enabled: true,
             remark: input.remark.clone(),
+            weight: None,
+            priority: None,
         };
         // 阿里云创建接口不支持备注，创建后单独设置
         if let Some(r) = input.remark.as_deref().filter(|r| !r.is_empty()) {

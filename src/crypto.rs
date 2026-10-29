@@ -81,7 +81,7 @@ pub fn load_or_create_master_key(
 
 // ---------- 管理员口令（argon2id） ----------
 
-const PASSWORD_HASH_KEY: &str = "admin_password_hash";
+pub const PASSWORD_HASH_KEY: &str = "admin_password_hash";
 
 /// 当前是否已设置管理员口令（用于首次启动引导）。
 /// 直接读取数据库：SQLite 本地读取代价极低，且避免多库场景下的缓存串扰。
@@ -108,6 +108,16 @@ pub async fn set_admin_password(
             return Err("旧口令不正确".to_string());
         }
     }
+    let new_hash = hash_password(new)?;
+    crate::db::set_setting(pool, PASSWORD_HASH_KEY, &new_hash)
+        .await
+        .map_err(|e| format!("保存口令失败: {e}"))?;
+    Ok(())
+}
+
+/// 强制重置管理员口令（运维通道，跳过旧口令校验）。
+/// 仅用于 reset-password 子命令等忘记口令场景；调用方需确保物理访问可信。
+pub async fn force_reset_admin_password(pool: &sqlx::SqlitePool, new: &str) -> Result<(), String> {
     let new_hash = hash_password(new)?;
     crate::db::set_setting(pool, PASSWORD_HASH_KEY, &new_hash)
         .await

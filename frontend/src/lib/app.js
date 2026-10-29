@@ -1,5 +1,12 @@
 // UniDNS 前端共享层：API 封装、工具、toast、modal、登录守卫
 
+// 注册 Service Worker（仅静态资源缓存）；HTTP 等非安全上下文注册失败时静默忽略
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
 export function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -52,6 +59,38 @@ export function toast(msg, kind = "") {
   el.className = "toast show " + kind;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
+}
+
+// ---------- 复制 ----------
+
+/**
+ * 复制文本到剪贴板，成功/失败均给出 toast。
+ * 优先 navigator.clipboard.writeText（需安全上下文 HTTPS/localhost）；
+ * HTTP 等非安全上下文回退隐藏 textarea + execCommand('copy')。
+ * 返回是否复制成功。
+ */
+export async function copyText(text) {
+  const value = String(text ?? "");
+  let ok = false;
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(value); ok = true; } catch { /* 走回退 */ }
+  }
+  if (!ok) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, value.length);
+      ok = document.execCommand("copy");
+      ta.remove();
+    } catch { ok = false; }
+  }
+  if (ok) toast("已复制到剪贴板", "ok");
+  else toast("复制失败，请手动选择复制", "err");
+  return ok;
 }
 
 // ---------- Modal ----------
@@ -126,6 +165,10 @@ export const PROVIDERS = {
   edgeone_intl: { label: "EdgeOne（国际站）", fields: secretFields("EdgeOne 国际站（edgeone.ai）API 密钥", true) },
   cloudflare: { label: "CloudFlare", fields: [
     { key: "api_token", label: "API Token", hint: "Zone.DNS 编辑权限的 API Token" },
+  ]},
+  volcengine: { label: "火山引擎", fields: [
+    { key: "access_key_id", label: "AccessKey ID", hint: "火山引擎 IAM 创建的 AccessKey ID" },
+    { key: "access_key_secret", label: "Secret Access Key", hint: "仅要求云解析 DNS 权限" },
   ]},
 };
 

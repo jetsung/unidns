@@ -165,12 +165,13 @@ async fn reconcile(
         for r in &records {
             platform_ids.insert(r.provider_record_id.clone());
             sqlx::query(
-                "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) \
+                "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at, weight, priority) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) \
                  ON CONFLICT(domain_id, provider_record_id) DO UPDATE SET \
                     host = excluded.host, rtype = excluded.rtype, value = excluded.value, \
                     ttl = excluded.ttl, line = excluded.line, proxied = excluded.proxied, \
                     status = excluded.status, pending_sync = 0, \
+                    weight = excluded.weight, priority = excluded.priority, \
                     remark = CASE WHEN records.remark IS NOT NULL AND records.remark != '' \
                                   THEN records.remark ELSE excluded.remark END, \
                     synced_at = excluded.synced_at",
@@ -187,6 +188,8 @@ async fn reconcile(
             .bind(if r.enabled { "enabled" } else { "disabled" })
             .bind(r.remark.clone().unwrap_or_default())
             .bind(&now)
+            .bind(r.weight)
+            .bind(r.priority)
             .execute(pool)
             .await
             .map_err(|e| ProviderError::Api {

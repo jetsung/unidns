@@ -38,6 +38,37 @@ fn validate_record_input(input: &RecordInput) -> Result<(), AppError> {
     if input.ttl == 0 || input.ttl > 86400 {
         return Err(AppError::BadRequest("TTL 需在 1-86400 秒之间".into()));
     }
+    if let Some(w) = input.weight
+        && !(-1..=100).contains(&w)
+    {
+        return Err(AppError::BadRequest(
+            "权重（weight）需在 -1~100 之间，留空表示平台默认".into(),
+        ));
+    }
+    if let Some(p) = input.priority
+        && !(0..=50).contains(&p)
+    {
+        return Err(AppError::BadRequest(
+            "优先级（priority）需在 0~50 之间，留空表示平台默认".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// 火山引擎记录备注限制 ≤16 UTF-8 字符（按官方中文文档保守校验；超长拒绝、不调平台）。
+fn check_volcengine_remark(
+    ptype: Option<crate::providers::ProviderType>,
+    remark: Option<&str>,
+) -> Result<(), AppError> {
+    if ptype != Some(crate::providers::ProviderType::Volcengine) {
+        return Ok(());
+    }
+    let r = remark.unwrap_or("");
+    if r.chars().count() > 16 {
+        return Err(AppError::BadRequest(
+            "火山引擎记录备注不能超过 16 个字符".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -107,6 +138,8 @@ fn provider_record_of(record: &RecordRow, updated: &RecordUpdate) -> ProviderRec
                 Some(record.remark.clone())
             }
         }),
+        weight: updated.weight.or(record.weight),
+        priority: updated.priority.or(record.priority),
     }
 }
 
@@ -117,8 +150,8 @@ async fn insert_local_record(
 ) -> Result<i64, AppError> {
     let now = now_utc();
     let result = sqlx::query(
-        "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'enabled', 0, ?, ?)",
+        "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at, weight, priority) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'enabled', 0, ?, ?, ?, ?)",
     )
     .bind(domain.id)
     .bind(domain.account_id)
@@ -131,6 +164,8 @@ async fn insert_local_record(
     .bind(r.proxied.map(|p| p as i64))
     .bind(r.remark.clone().unwrap_or_default())
     .bind(&now)
+    .bind(r.weight)
+    .bind(r.priority)
     .execute(&state.pool)
     .await
     .map_err(AppError::Db)?;
@@ -156,6 +191,8 @@ fn record_json(record: &RecordRow, domain: &DomainRow, account: &AccountRow) -> 
         "remark": record.remark,
         "pending_sync": record.pending_sync == 1,
         "synced_at": record.synced_at,
+        "weight": record.weight,
+        "priority": record.priority,
     })
 }
 
@@ -369,6 +406,7 @@ pub async fn create_record(
             "所属账户已停用，无法操作解析记录".into(),
         ));
     }
+    check_volcengine_remark(account.provider_type(), input.remark.as_deref())?;
     let provider = build_provider_for_account(&state, &account)?;
     let created = provider.create_record(&zone_of(&domain), &input).await?;
     let record_id = insert_local_record(&state, &domain, &created).await?;
@@ -388,6 +426,8 @@ pub struct RecordUpdate {
     pub line: Option<String>,
     pub proxied: Option<bool>,
     pub remark: Option<String>,
+    pub weight: Option<i64>,
+    pub priority: Option<i64>,
 }
 
 /// PATCH /api/v1/records/{id} —— 修改记录并回写平台。
@@ -403,6 +443,8 @@ pub async fn update_record(
         && update.line.is_none()
         && update.proxied.is_none()
         && update.remark.is_none()
+        && update.weight.is_none()
+        && update.priority.is_none()
     {
         return Err(AppError::BadRequest("至少提供一个要修改的字段".into()));
     }
@@ -421,20 +463,26 @@ pub async fn update_record(
         line: merged.line.clone(),
         proxied: merged.proxied,
         remark: merged.remark.clone(),
+        weight: merged.weight,
+        priority: merged.priority,
     })?;
+    check_volcengine_remark(account.provider_type(), merged.remark.as_deref())?;
     let provider = build_provider_for_account(&state, &account)?;
     match provider.update_record(&zone_of(&domain), &merged).await {
-        Ok(_) => {
+        // 以适配器返回值写库，确保 EdgeOne 的归一结果（line 为空等）落盘
+        Ok(updated) => {
             sqlx::query(
-                "UPDATE records SET host = ?, rtype = ?, value = ?, ttl = ?, line = ?, proxied = ?, remark = ?, pending_sync = 0, synced_at = ? WHERE id = ?",
+                "UPDATE records SET host = ?, rtype = ?, value = ?, ttl = ?, line = ?, proxied = ?, remark = ?, weight = ?, priority = ?, pending_sync = 0, synced_at = ? WHERE id = ?",
             )
-            .bind(&merged.host)
-            .bind(&merged.rtype)
-            .bind(&merged.value)
-            .bind(merged.ttl as i64)
-            .bind(merged.line.clone().unwrap_or_default())
-            .bind(merged.proxied.map(|p| p as i64))
-            .bind(merged.remark.clone().unwrap_or_default())
+            .bind(&updated.host)
+            .bind(&updated.rtype)
+            .bind(&updated.value)
+            .bind(updated.ttl as i64)
+            .bind(updated.line.clone().unwrap_or_default())
+            .bind(updated.proxied.map(|p| p as i64))
+            .bind(updated.remark.clone().unwrap_or_default())
+            .bind(updated.weight)
+            .bind(updated.priority)
             .bind(now_utc())
             .bind(id)
             .execute(&state.pool)
@@ -682,6 +730,229 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0, "平台失败时本地不应产生记录");
+    }
+
+    #[tokio::test]
+    async fn record_weight_priority_validation_and_update() {
+        let (state, mocks) = test_app_with_multi_mock().await;
+        let mock = mocks.get("a").unwrap().clone();
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+        let res = req(&app, "POST", "/api/v1/accounts",
+            Some(r#"{"name":"测试","provider_type":"cloudflare","credentials":{"api_token":"token-aaaa-1111","mock_id":"a"}}"#),
+            Some(&cookie)).await;
+        let account_id = body_json(res).await["id"].as_i64().unwrap();
+        req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{account_id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        wait_sync_done(&state.pool, account_id).await;
+        let domain_id: i64 = sqlx::query_scalar("SELECT id FROM domains LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+
+        // 创建时越界拒绝：weight 需在 -1~100，priority 需在 0~50
+        for bad in [
+            r#"{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"weight":101}"#,
+            r#"{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"weight":-2}"#,
+            r#"{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"priority":51}"#,
+            r#"{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"priority":-1}"#,
+        ] {
+            let res = req(
+                &app,
+                "POST",
+                &format!("/api/v1/domains/{domain_id}/records"),
+                Some(bad),
+                Some(&cookie),
+            )
+            .await;
+            assert_eq!(res.status(), 400, "{bad}");
+        }
+
+        // 创建成功后再验证修改时越界同样拒绝，且不调用平台
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/domains/{domain_id}/records"),
+            Some(r#"{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 201);
+        let new_id = body_json(res).await["id"].as_i64().unwrap();
+        mock.take_calls().await;
+
+        for bad in [
+            r#"{"weight":101}"#,
+            r#"{"weight":-2}"#,
+            r#"{"priority":51}"#,
+            r#"{"priority":-1}"#,
+        ] {
+            let res = req(
+                &app,
+                "PATCH",
+                &format!("/api/v1/records/{new_id}"),
+                Some(bad),
+                Some(&cookie),
+            )
+            .await;
+            assert_eq!(res.status(), 400, "{bad}");
+        }
+        assert!(
+            mock.take_calls().await.is_empty(),
+            "越界校验失败不应调用平台"
+        );
+
+        // 清空权重（提交 -1）与设置优先级可写库（EdgeOne 适配器会把 -1/0 归一为空，
+        // 由 providers::edgeone::tests::clear_weight_priority_via_api_is_normalized 覆盖）
+        let res = req(
+            &app,
+            "PATCH",
+            &format!("/api/v1/records/{new_id}"),
+            Some(r#"{"weight":-1,"priority":10}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 204);
+        let row = sqlx::query_as::<_, RecordRow>("SELECT * FROM records WHERE id = ?")
+            .bind(new_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.weight, Some(-1));
+        assert_eq!(row.priority, Some(10));
+    }
+
+    /// 火山引擎记录备注限制 ≤16 UTF-8 字符：创建与修改均拒绝，且不调用平台。
+    #[tokio::test]
+    async fn volcengine_remark_length_rejected() {
+        let (state, mocks) = test_app_with_multi_mock().await;
+        let mock = mocks.get("a").unwrap().clone();
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+        let res = req(&app, "POST", "/api/v1/accounts",
+            Some(r#"{"name":"火山测试","provider_type":"volcengine","credentials":{"access_key_id":"ak-aaaa-1111","access_key_secret":"sk-aaaa-2222","mock_id":"a"}}"#),
+            Some(&cookie)).await;
+        assert_eq!(res.status(), 201);
+        let account_id = body_json(res).await["id"].as_i64().unwrap();
+        req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{account_id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        wait_sync_done(&state.pool, account_id).await;
+        let domain_id: i64 = sqlx::query_scalar("SELECT id FROM domains LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+
+        // 创建时：17 字符（含中文按字符计）超长拒绝；16 字符以内放行
+        mock.take_calls().await; // 清空账户创建/同步产生的历史平台调用
+        let too_long = format!(
+            r#"{{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"remark":"{}"}}"#,
+            "备".repeat(17)
+        );
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/domains/{domain_id}/records"),
+            Some(&too_long),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 400, "17 字符备注应被拒绝");
+        assert!(
+            body_json(res).await["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("16")
+        );
+        assert!(mock.take_calls().await.is_empty(), "超长备注不应调用平台");
+
+        // 创建成功（16 字符），再验证修改时超长同样拒绝且不调用平台
+        let ok16 = format!(
+            r#"{{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"remark":"{}"}}"#,
+            "注".repeat(16)
+        );
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/domains/{domain_id}/records"),
+            Some(&ok16),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 201, "16 字符备注应放行");
+        let record_id = body_json(res).await["id"].as_i64().unwrap();
+        mock.take_calls().await;
+
+        let patch = format!(r#"{{"remark":"{}"}}"#, "长".repeat(17));
+        let res = req(
+            &app,
+            "PATCH",
+            &format!("/api/v1/records/{record_id}"),
+            Some(&patch),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 400, "修改时 17 字符备注应被拒绝");
+        assert!(mock.take_calls().await.is_empty(), "超长备注不应调用平台");
+
+        // 非 volcengine 平台不受 16 字符限制（对照：cloudflare 长备注正常走平台）
+        let mock_b = mocks.get("b").unwrap().clone();
+        {
+            let mut guard = mock_b.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let res = req(&app, "POST", "/api/v1/accounts",
+            Some(r#"{"name":"CF对照","provider_type":"cloudflare","credentials":{"api_token":"token-aaaa-1111","mock_id":"b"}}"#),
+            Some(&cookie)).await;
+        let cf_account = body_json(res).await["id"].as_i64().unwrap();
+        req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{cf_account}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        wait_sync_done(&state.pool, cf_account).await;
+        let cf_domain: i64 = sqlx::query_scalar(
+            "SELECT d.id FROM domains d JOIN accounts a ON a.id = d.account_id \
+             WHERE a.provider_type = 'cloudflare' LIMIT 1",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        let long = format!(
+            r#"{{"host":"www","rtype":"A","value":"1.2.3.4","ttl":600,"remark":"{}"}}"#,
+            "长".repeat(30)
+        );
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/domains/{cf_domain}/records"),
+            Some(&long),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 201, "非火山引擎平台不受 16 字符备注限制");
     }
 
     #[tokio::test]

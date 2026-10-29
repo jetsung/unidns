@@ -11,7 +11,7 @@
 | `listen` | `UNIDNS_LISTEN` | `0.0.0.0:18686` | HTTP 监听地址 |
 | `data_dir` | `UNIDNS_DATA_DIR` | `./data` | 数据目录：SQLite 数据库、`secret.key`、示例配置 |
 | `sync_interval_minutes` | `UNIDNS_SYNC_INTERVAL` | `0` | 定时全量同步间隔（分钟）；`0` 停用自动同步，大于 0 至少 30（1–29 视为停用） |
-| `admin_password` | `UNIDNS_ADMIN_PASSWORD` | 无 | 预置管理员口令，仅首次创建口令时生效 |
+| `admin_password` | `UNIDNS_ADMIN_PASSWORD` | 无 | 预置管理员口令，仅首次创建口令时生效；忘记口令用 `unidns reset-password` 重置 |
 | `master_key` | `UNIDNS_MASTER_KEY` | 自动生成 | 凭据加密主密钥，64 位 hex（32 字节） |
 | — | `UNIDNS_CONFIG` | `./config.toml` | 配置文件路径（仅环境变量） |
 
@@ -46,6 +46,23 @@
     export UNIDNS_MASTER_KEY=$(openssl rand -hex 32)
     cargo run --release
     ```
+
+=== "Docker Compose（.env）"
+
+    ```bash
+    # 与 compose.yaml 同目录，由 env_file: ./.env 注入容器
+    # 凭据加密主密钥（64 位 hex，建议固定；留空则首次启动自动生成 data/secret.key）
+    UNIDNS_MASTER_KEY=
+    # 预置管理员口令（仅首次设置口令时生效）
+    UNIDNS_ADMIN_PASSWORD=
+    # 定时全量同步间隔（分钟）；0 停用自动同步，启用时至少 30
+    UNIDNS_SYNC_INTERVAL=0
+    # 日志级别（RUST_LOG 语法）
+    UNIDNS_LOG=info
+    ```
+
+    容器内已默认监听 `0.0.0.0:18686`、数据目录 `/app/data`，通常无需设置
+    `UNIDNS_LISTEN` / `UNIDNS_DATA_DIR`；空值视为未设置。
 
 ## 主密钥（master_key）
 

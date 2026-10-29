@@ -56,7 +56,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:18686/api/v1/accounts \
 ```
 
 `provider_type` 取值：`aliyun` / `dnspod` / `dnspod_intl` / `edgeone` /
-`edgeone_intl` / `cloudflare`。状态仅 `enabled` / `disabled`。
+`edgeone_intl` / `cloudflare` / `volcengine`。状态仅 `enabled` / `disabled`。
 
 ## 域名与记录
 
@@ -67,7 +67,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:18686/api/v1/accounts \
 | PATCH | `/domains/{id}` | 更新本地备注（`remark`，不回写平台） |
 | GET | `/domains/{id}/records?...` | 记录列表（支持搜索/筛选，分页同上） |
 | POST | `/domains/{id}/records` | 新建记录（回写上游平台，TTL/线路受平台约束） |
-| PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied） |
+| PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied/weight/priority） |
 | POST | `/records/{id}/status` | 启用/停用（回写平台） |
 | DELETE | `/records/{id}` | 删除记录（回写平台） |
 

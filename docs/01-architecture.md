@@ -74,13 +74,14 @@ pub trait DnsProvider: Send + Sync {
 
 ## 数据模型（migrations/0001_init.sql）
 
-- `accounts`：平台账户。`provider_type` 受 CHECK 约束（六值枚举），
+- `accounts`：平台账户。`provider_type` 受 CHECK 约束（七值枚举，含 `volcengine`），
   `credentials_enc` 为 AES-256-GCM 密文（nonce 前置），`credentials_mask`
   存打码展示串。
 - `domains`：同步下来的域名，`UNIQUE(account_id, name)`；`remark` 为本地备注，
   不回写平台。
 - `records`：解析记录，含上游 `provider_record_id` 便于回写；
-  `pending_sync` 标记待同步变更。
+  `pending_sync` 标记待同步变更；`weight`/`priority` 为 EdgeOne 适用字段，
+  其他平台为 NULL。
 - `settings`：KV 配置（管理员口令哈希、同步开关等）。
 - `sync_runs`：同步运行历史。
 
@@ -89,3 +90,17 @@ pub trait DnsProvider: Send + Sync {
 Astro 5 静态站点，构建产物输出到 `frontend/dist`，由 rust-embed 在
 `cargo build` 时嵌入二进制。开发时 `astro dev` 将 `/api` 代理到本地 18686，
 无需改动后端。
+
+`frontend/public/` 下的品牌与 PWA 资源随构建原样复制到 `dist` 根：
+
+| 文件 | 用途 |
+|---|---|
+| `icon.svg` | 品牌图标源文件（与登录页 `.brand-mark` 视觉一致） |
+| `favicon.png` / `favicon.ico` | 页面 favicon（PNG 为主，ICO 兜底 `/favicon.ico` 隐式请求） |
+| `icon-192.png` / `icon-512.png` | Web App Manifest 声明的应用图标 |
+| `manifest.webmanifest` | Web App Manifest（名称、图标、主题色、`standalone`） |
+| `sw.js` | 静态资源缓存优先的 Service Worker；由 `src/lib/app.js` 在页面加载后注册 |
+
+Service Worker 缓存名为 `unidns-static-v1`，仅缓存同源 GET 且非 `/api/` 的
+请求，激活时清理旧版本缓存；修改静态资源时需同步 bump 缓存版本。`/api/`
+请求与跨域请求直接走网络，不写入缓存。

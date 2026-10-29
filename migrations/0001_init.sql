@@ -1,9 +1,9 @@
--- unidns 初始表结构（合并自早期 0001-0004：项目无线上库，直接建最终结构）
+-- unidns 初始表结构（项目无线上库，直接建最终结构）
 
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    provider_type TEXT NOT NULL CHECK (provider_type IN ('aliyun', 'dnspod', 'dnspod_intl', 'cloudflare', 'edgeone', 'edgeone_intl')),
+    provider_type TEXT NOT NULL CHECK (provider_type IN ('aliyun', 'dnspod', 'dnspod_intl', 'cloudflare', 'edgeone', 'edgeone_intl', 'volcengine')),
     credentials_enc BLOB NOT NULL,
     credentials_mask TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'enabled' CHECK (status IN ('enabled', 'disabled')),
@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS records (
     pending_sync INTEGER NOT NULL DEFAULT 0,
     synced_at TEXT NOT NULL,
     remark TEXT NOT NULL DEFAULT '',
+    weight INTEGER,
+    priority INTEGER,
     UNIQUE (domain_id, provider_record_id)
 );
 

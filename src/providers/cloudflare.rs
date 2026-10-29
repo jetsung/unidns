@@ -37,6 +37,8 @@ fn parse_record(v: &Value, zone: &str) -> Option<ProviderRecord> {
             .and_then(|c| c.as_str())
             .filter(|c| !c.is_empty())
             .map(String::from),
+        weight: None,
+        priority: None,
     })
 }
 

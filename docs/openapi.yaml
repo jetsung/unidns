@@ -799,7 +799,7 @@ components:
     # ---------- 枚举 ----------
     ProviderType:
       type: string
-      enum: [aliyun, dnspod, dnspod_intl, edgeone, edgeone_intl, cloudflare]
+      enum: [aliyun, dnspod, dnspod_intl, edgeone, edgeone_intl, cloudflare, volcengine]
       description: 平台类型
     AccountStatus:
       type: string
@@ -938,6 +938,7 @@ components:
             - dnspod / dnspod_intl: `secret_id`, `secret_key`
             - edgeone / edgeone_intl: `secret_id`, `secret_key`
             - cloudflare: `api_token`
+            - volcengine: `access_key_id`, `access_key_secret`
           additionalProperties: true
       required: [name, provider_type, credentials]
     UpdateAccountRequest:
@@ -1041,6 +1042,16 @@ components:
           type: boolean
           nullable: true
           description: CloudFlare 代理状态；其他平台为 null
+        weight:
+          type: integer
+          format: int64
+          nullable: true
+          description: 权重（仅 EdgeOne 适用；-1 表示未设置，本地为 null）
+        priority:
+          type: integer
+          format: int64
+          nullable: true
+          description: 优先级（仅 EdgeOne 的 MX 记录适用；0 表示未设置，本地为 null）
         status:
           $ref: '#/components/schemas/RecordStatus'
         remark:
@@ -1089,12 +1100,24 @@ components:
           description: TTL（1–86400 秒）
         line:
           type: string
-          description: 解析线路（阿里云 / DNSPod）
+          description: 解析线路（阿里云 / DNSPod；EdgeOne 不支持，留空）
         proxied:
           type: boolean
           description: CloudFlare 代理状态
         remark:
           type: string
+        weight:
+          type: integer
+          format: int64
+          minimum: -1
+          maximum: 100
+          description: 权重，仅 EdgeOne 适用且仅 A/AAAA/CNAME 记录下发；留空表示平台默认（-1）
+        priority:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 50
+          description: 优先级，仅 EdgeOne 适用且仅 MX 记录下发；留空表示平台默认（0）
       required: [host, rtype, value]
     RecordUpdate:
       type: object
@@ -1116,6 +1139,18 @@ components:
           type: boolean
         remark:
           type: string
+        weight:
+          type: integer
+          format: int64
+          minimum: -1
+          maximum: 100
+          description: 权重（仅 EdgeOne 适用）；-1 表示清空（平台默认）
+        priority:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 50
+          description: 优先级（仅 EdgeOne 适用）；0 表示清空（平台默认）
       minProperties: 1
     StatusRequest:
       type: object

@@ -35,6 +35,8 @@ impl DemoProvider {
                         proxied: None,
                         enabled: true,
                         remark: None,
+                        weight: None,
+                        priority: None,
                     },
                     ProviderRecord {
                         provider_record_id: "1002".into(),
@@ -46,6 +48,8 @@ impl DemoProvider {
                         proxied: None,
                         enabled: true,
                         remark: None,
+                        weight: None,
+                        priority: None,
                     },
                 ],
             ),
@@ -61,6 +65,8 @@ impl DemoProvider {
                     proxied: Some(false),
                     remark: None,
                     enabled: true,
+                    weight: None,
+                    priority: None,
                 }],
             ),
         ]
@@ -122,6 +128,8 @@ impl DnsProvider for DemoProvider {
             proxied: input.proxied,
             enabled: true,
             remark: input.remark.clone(),
+            weight: input.weight,
+            priority: input.priority,
         };
         store
             .entry(zone.name.clone())
