@@ -720,6 +720,12 @@
 <code>/api</code> 请求代理到 18686 后端。<strong>注意</strong>：<code>cargo build</code> 经 rust-embed 在编译期
 读取 <code>frontend/dist</code>，改完前端需先 <code>just frontend-build</code> 再编译后端，
 否则嵌入的是旧产物。</p>
+<p>品牌与 PWA 资源（<code>favicon.*</code>、<code>icon-*.png</code>、<code>manifest.webmanifest</code>、<code>sw.js</code>）
+放在 <code>frontend/public/</code>，由 Vite 原样复制到产物根路径。修改图标后需重新导出
+各尺寸 PNG/ICO（源文件为 <code>icon.svg</code>）。页面会注册 Service Worker（静态资源
+缓存优先），开发时若前端改动后仍加载旧资源，在 DevTools → Application →
+Service Workers 注销并清空 Cache Storage，或使用强制刷新；调试时可临时把
+<code>sw.js</code> 的缓存版本号 bump 一位。</p>
 <h2 id="prek">提交前检查（prek）<a class="headerlink" href="#prek" title="Permanent link">&para;</a></h2>
 <p>提交钩子见 <code>prek.toml</code>：pre-commit 阶段自动格式化（<code>cargo fmt --all</code>）+
 文件卫生检查；pre-push 阶段跑 clippy（<code>-D warnings</code>）与单元测试。</p>

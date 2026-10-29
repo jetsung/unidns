@@ -981,6 +981,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#113-pwa" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        11.3 品牌图标与可安装 PWA
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1188,7 +1199,7 @@
 </tr>
 <tr>
 <td>静态前端</td>
-<td>Astro 构建产物在编译期嵌入；开发时代理 <code>/api</code> 到后端</td>
+<td>Astro 构建产物在编译期嵌入（含品牌图标、Web App Manifest 与 Service Worker）；开发时代理 <code>/api</code> 到后端</td>
 </tr>
 <tr>
 <td>错误</td>
@@ -2058,11 +2069,36 @@
   （上一页/下一页禁用）。</li>
 <li>分页参数传递给对应列表 API（§10.2）。</li>
 </ul>
+<h3 id="113-pwa">11.3 品牌图标与可安装 PWA<a class="headerlink" href="#113-pwa" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>图标资源</strong>：系统 SHALL 提供源自登录页 brand 图形（"U" 圆角方块、蓝紫
+  渐变）的图片资源，包括 PNG favicon、ICO 兼容格式与 192px / 512px 应用
+  图标；页面内由 CSS 绘制的 brand 展示 SHALL 保持不变。</li>
+<li><strong>页面引用</strong>：所有页面（登录页、首次设置页、管理页与入口跳转页）的 HTML
+  head SHALL 引用 PNG favicon、<code>/favicon.ico</code> 兜底与 Web App Manifest，
+  浏览器标签页显示品牌图标；直接请求 <code>/favicon.ico</code> SHALL 返回 ICO 格式的
+  品牌图标。</li>
+<li><strong>Web App Manifest</strong>：SHALL 提供 manifest，声明应用名称 <code>UniDNS</code>、192px
+  与 512px 图标、主题色与背景色（取界面设计系统的固定值）、
+  <code>display: standalone</code> 与 <code>start_url</code>，使控制台可被浏览器识别为可安装
+  应用；安装后以声明的名称与品牌图标在独立窗口打开。</li>
+<li><strong>Service Worker 缓存</strong>：所有页面 SHALL 注册 Service Worker；同源 GET 且
+  非 <code>/api/</code> 的静态资源（页面、脚本、样式、图标、manifest）采用缓存优先
+  （未命中回源并写入缓存）；<code>/api/</code> 请求与跨域请求 MUST 直连网络，既不
+  返回缓存副本也不写入缓存；缓存 SHALL 按版本命名，新版本激活时 SHALL
+  删除旧版本缓存。</li>
+<li><strong>降级</strong>：Service Worker 仅在安全上下文（HTTPS 或 localhost）可用；HTTP
+  部署下注册失败 MUST 静默忽略、不影响既有功能，favicon 与 manifest 仍然
+  生效，PWA 降级为普通网页。</li>
+</ul>
 <h2 id="12">12. 部署形态<a class="headerlink" href="#12" title="Permanent link">&para;</a></h2>
 <h3 id="121">12.1 裸机 / 单二进制<a class="headerlink" href="#121" title="Permanent link">&para;</a></h3>
 <p>编译产出单个可执行文件；默认监听 <code>0.0.0.0:18686</code>，数据目录默认工作目录下
 <code>./data</code>。需备份的数据只有数据目录：<code>unidns.db</code>（SQLite，WAL 模式，热备份
 建议 <code>sqlite3 unidns.db ".backup backup.db"</code>）与 <code>secret.key</code>（必须）。</p>
+<p>控制台可直接以 HTTP 访问；若需安装为桌面/主屏应用（PWA），应经反向代理启用
+HTTPS——Service Worker 仅在 HTTPS 或 localhost 下可用，HTTP 访问时自动降级
+为普通网页（品牌图标与 manifest 不受影响，见 §11.3）。</p>
 <h3 id="122-docker">12.2 Docker<a class="headerlink" href="#122-docker" title="Permanent link">&para;</a></h3>
 <ul>
 <li>多阶段构建：前端构建（Node/pnpm，产物为静态站点）→ 静态编译（musl 静态
@@ -2081,7 +2117,10 @@
 </ul>
 <h3 id="123">12.3 前端开发模式<a class="headerlink" href="#123" title="Permanent link">&para;</a></h3>
 <p>前端为静态站点构建产物；开发时开发服务器将 <code>/api</code> 代理到本地 <code>18686</code>
-后端，无需改动后端。</p>
+后端，无需改动后端。品牌图标、manifest 与 <code>sw.js</code> 等 PWA 资源位于前端
+<code>public/</code> 目录，构建时原样复制到产物根路径；开发服务器下同样以根路径访问。
+页面会注册 Service Worker，开发时若前端改动后仍加载旧静态资源，需在浏览器
+开发者工具中注销 Service Worker 并清空 Cache Storage（或强制刷新）。</p>
 <h2 id="13">13. 参考实现（非规范性说明）<a class="headerlink" href="#13" title="Permanent link">&para;</a></h2>
 <p>参考实现技术栈，仅供对照，不构成重实现约束：</p>
 <ul>

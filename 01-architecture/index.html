@@ -788,6 +788,40 @@
 <p>Astro 5 静态站点，构建产物输出到 <code>frontend/dist</code>，由 rust-embed 在
 <code>cargo build</code> 时嵌入二进制。开发时 <code>astro dev</code> 将 <code>/api</code> 代理到本地 18686，
 无需改动后端。</p>
+<p><code>frontend/public/</code> 下的品牌与 PWA 资源随构建原样复制到 <code>dist</code> 根：</p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>icon.svg</code></td>
+<td>品牌图标源文件（与登录页 <code>.brand-mark</code> 视觉一致）</td>
+</tr>
+<tr>
+<td><code>favicon.png</code> / <code>favicon.ico</code></td>
+<td>页面 favicon（PNG 为主，ICO 兜底 <code>/favicon.ico</code> 隐式请求）</td>
+</tr>
+<tr>
+<td><code>icon-192.png</code> / <code>icon-512.png</code></td>
+<td>Web App Manifest 声明的应用图标</td>
+</tr>
+<tr>
+<td><code>manifest.webmanifest</code></td>
+<td>Web App Manifest（名称、图标、主题色、<code>standalone</code>）</td>
+</tr>
+<tr>
+<td><code>sw.js</code></td>
+<td>静态资源缓存优先的 Service Worker；由 <code>src/lib/app.js</code> 在页面加载后注册</td>
+</tr>
+</tbody>
+</table>
+<p>Service Worker 缓存名为 <code>unidns-static-v1</code>，仅缓存同源 GET 且非 <code>/api/</code> 的
+请求，激活时清理旧版本缓存；修改静态资源时需同步 bump 缓存版本。<code>/api/</code>
+请求与跨域请求直接走网络，不写入缓存。</p>
 
 
 
