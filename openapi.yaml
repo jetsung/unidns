@@ -799,7 +799,7 @@ components:
     # ---------- 枚举 ----------
     ProviderType:
       type: string
-      enum: [aliyun, dnspod, dnspod_intl, edgeone, edgeone_intl, cloudflare]
+      enum: [aliyun, dnspod, dnspod_intl, edgeone, edgeone_intl, cloudflare, volcengine]
       description: 平台类型
     AccountStatus:
       type: string
@@ -938,6 +938,7 @@ components:
             - dnspod / dnspod_intl: `secret_id`, `secret_key`
             - edgeone / edgeone_intl: `secret_id`, `secret_key`
             - cloudflare: `api_token`
+            - volcengine: `access_key_id`, `access_key_secret`
           additionalProperties: true
       required: [name, provider_type, credentials]
     UpdateAccountRequest:

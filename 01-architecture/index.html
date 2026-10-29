@@ -773,13 +773,14 @@
 </ul>
 <h2 id="migrations0001_initsql">数据模型（migrations/0001_init.sql）<a class="headerlink" href="#migrations0001_initsql" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>accounts</code>：平台账户。<code>provider_type</code> 受 CHECK 约束（六值枚举），
+<li><code>accounts</code>：平台账户。<code>provider_type</code> 受 CHECK 约束（七值枚举，含 <code>volcengine</code>），
   <code>credentials_enc</code> 为 AES-256-GCM 密文（nonce 前置），<code>credentials_mask</code>
   存打码展示串。</li>
 <li><code>domains</code>：同步下来的域名，<code>UNIQUE(account_id, name)</code>；<code>remark</code> 为本地备注，
   不回写平台。</li>
 <li><code>records</code>：解析记录，含上游 <code>provider_record_id</code> 便于回写；
-  <code>pending_sync</code> 标记待同步变更。</li>
+  <code>pending_sync</code> 标记待同步变更；<code>weight</code>/<code>priority</code> 为 EdgeOne 适用字段，
+  其他平台为 NULL。</li>
 <li><code>settings</code>：KV 配置（管理员口令哈希、同步开关等）。</li>
 <li><code>sync_runs</code>：同步运行历史。</li>
 </ul>

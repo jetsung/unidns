@@ -1088,8 +1088,8 @@
 <h2 id="1">1. 产品概述<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
 <p>UniDNS 是多平台 DNS 记录统一管理系统（自托管，Web 控制台形态）：</p>
 <ul>
-<li>把阿里云、腾讯云 DNSPod（国内/国际站）、EdgeOne（国内/国际站）、CloudFlare
-  六类 DNS 平台聚合到一个界面；同一平台可添加多个账户。</li>
+<li>把阿里云、腾讯云 DNSPod（国内/国际站）、EdgeOne（国内/国际站）、CloudFlare、
+  火山引擎七类 DNS 平台聚合到一个界面；同一平台可添加多个账户。</li>
 <li>从平台拉取域名（EdgeOne 为站点）列表与解析记录，维护本地统一视图。</li>
 <li>在统一视图上对解析记录执行跨平台一致的创建、修改、启用/停用与删除，
   操作实时回写对应平台。</li>
@@ -1108,7 +1108,7 @@
 <tbody>
 <tr>
 <td>账户（account）</td>
-<td>某一 DNS 平台的 API 凭据条目，六种平台类型之一</td>
+<td>某一 DNS 平台的 API 凭据条目，七种平台类型之一</td>
 </tr>
 <tr>
 <td>域名/站点（domain）</td>
@@ -1136,13 +1136,13 @@
 <h3 id="21">2.1 架构形态<a class="headerlink" href="#21" title="Permanent link">&para;</a></h3>
 <p>三层结构，全部状态经共享应用状态（等价于 <code>Arc&lt;AppState&gt;</code>）传递：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>浏览器 ──静态页面──&gt; 内嵌 Web 前端（编译期嵌入二进制）
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>   └──/api/v1/*──&gt; Web 层（会话鉴权）──&gt; 同步引擎 ──&gt; 平台适配器 ──&gt; 六个 DNS 平台
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>   └──/api/v1/*──&gt; Web 层（会话鉴权）──&gt; 同步引擎 ──&gt; 平台适配器 ──&gt; 七个 DNS 平台
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                        └───────────── SQLite（WAL 模式）&lt;────────────┘
 </span></code></pre></div>
 <ul>
 <li><strong>Web 层</strong>：HTTP 路由与会话鉴权，按 auth / accounts / records / sync 分组。</li>
 <li><strong>同步引擎</strong>：账户级并发调度、平台限流退避、同步运行记录。</li>
-<li><strong>平台适配器</strong>：统一的提供商接口 + 六个实现 + 按平台类型构造的工厂。</li>
+<li><strong>平台适配器</strong>：统一的提供商接口 + 七个实现 + 按平台类型构造的工厂。</li>
 <li><strong>存储</strong>：SQLite，WAL 模式 + 外键约束 + 忙等待；启动时执行迁移。</li>
 </ul>
 <h3 id="22">2.2 功能模块划分<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
@@ -1176,7 +1176,7 @@
 </tr>
 <tr>
 <td>平台适配器</td>
-<td>统一提供商接口 + 六实现 + 工厂</td>
+<td>统一提供商接口 + 七实现 + 工厂</td>
 </tr>
 <tr>
 <td>同步引擎</td>
@@ -1281,10 +1281,13 @@
 重新录入；文档必须提示用户把 <code>secret.key</code> 与数据库一起备份。</p>
 <h2 id="4">4. 安全规范<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>管理员口令</strong>：以 Argon2id 单向哈希存储（存于 <code>settings</code> 表）；任何接口
-  与存储文件不得出现口令明文。口令长度至少 8 个字符。首次启动未设置口令时
-  引导设置，也可用 <code>UNIDNS_ADMIN_PASSWORD</code> 预置（仅创建时生效）。修改口令
-  需验证旧口令，新口令立即生效。</li>
+<li><strong>管理员口令</strong>：以 Argon2id 单向哈希存储（存于 <code>settings</code> 表，键
+  <code>admin_password_hash</code>）；任何接口与存储文件不得出现口令明文。口令长度
+  至少 8 个字符。首次启动未设置口令时引导设置，也可用 <code>UNIDNS_ADMIN_PASSWORD</code>
+  预置（仅创建时生效）。修改口令需验证旧口令，新口令立即生效。忘记口令时提供
+  <code>unidns reset-password</code> 子命令作为运维通道：连接配置指向的数据库，交互式
+  输入新口令后直接覆盖哈希，<strong>跳过旧口令校验</strong>（要求执行者具备数据库
+  文件访问权限，执行前应停止 Web 服务）；不影响已存的账户凭据。</li>
 <li><strong>会话</strong>：登录成功颁发会话 Cookie（内存会话存储；Cookie 属性 httpOnly、
   <code>SameSite=Lax</code>，不设 Secure 以兼容反向代理终止 TLS 的 HTTP 部署）；除登录
   引导接口（<code>auth/status</code>、<code>auth/login</code>、<code>auth/setup</code>）外一切 API 与页面要求
@@ -1355,10 +1358,15 @@
 <td><code>api_token</code></td>
 <td>My Profile → API Tokens（需 Zone.DNS 编辑权限）</td>
 </tr>
+<tr>
+<td>火山引擎（<code>volcengine</code>）</td>
+<td><code>access_key_id</code>、<code>access_key_secret</code></td>
+<td>火山引擎控制台 → AccessKey（需云解析 DNS 权限）</td>
+</tr>
 </tbody>
 </table>
 <ul>
-<li>平台类型为封闭枚举（六值），提交列表外的类型拒绝保存。</li>
+<li>平台类型为封闭枚举（七值），提交列表外的类型拒绝保存。</li>
 <li>凭据必填字段缺失时拒绝保存并指出缺失字段。</li>
 <li>国内站与国际站账号体系独立，密钥不通用；验证与同步按所选站点的端点执行。</li>
 </ul>
@@ -1366,10 +1374,12 @@
 <ul>
 <li><strong>签名</strong>：阿里云 RPC 签名（HMAC-SHA1 + PercentEncode，GET 公共参数）；
   DNSPod 与 EdgeOne 共用腾讯云 TC3-HMAC-SHA256；CloudFlare 使用
-  <code>Authorization: Bearer &lt;token&gt;</code>。</li>
+  <code>Authorization: Bearer &lt;token&gt;</code>；火山引擎使用 V4 HMAC-SHA256 签名
+  （<code>Action</code>/<code>Version</code> 公共参数，GET/POST RPC 调用，端点
+  <code>dns.volcengineapi.com</code>）。</li>
 <li><strong>连通性验证调用</strong>：阿里云 <code>DescribeDomains</code>、DNSPod/EdgeOne
-  <code>DescribeZoneList</code>、CloudFlare <code>GET /zones</code>；失败提示透传平台原始错误码
-  与消息。</li>
+  <code>DescribeZoneList</code>、CloudFlare <code>GET /zones</code>、火山引擎 <code>ListZones</code>；失败
+  提示透传平台原始错误码与消息。</li>
 <li><strong>能力差异</strong>：所有平台均支持验证、域名列表、记录增删改查、启用/停用、
   记录与域名备注；个别平台备注能力受上游 API 限制，调用不支持的平台返回
   <code>Unsupported</code>（HTTP 409，错误码 <code>provider_unsupported</code>）。</li>
@@ -1402,7 +1412,7 @@
 <tr>
 <td>provider_type</td>
 <td>TEXT</td>
-<td>非空，CHECK 六值枚举：<code>aliyun</code>/<code>dnspod</code>/<code>dnspod_intl</code>/<code>cloudflare</code>/<code>edgeone</code>/<code>edgeone_intl</code></td>
+<td>非空，CHECK 七值枚举：<code>aliyun</code>/<code>dnspod</code>/<code>dnspod_intl</code>/<code>cloudflare</code>/<code>edgeone</code>/<code>edgeone_intl</code>/<code>volcengine</code></td>
 </tr>
 <tr>
 <td>credentials_enc</td>
@@ -1639,7 +1649,7 @@
 <h2 id="7-provider-accounts">7. 平台账户规范（provider-accounts）<a class="headerlink" href="#7-provider-accounts" title="Permanent link">&para;</a></h2>
 <h3 id="71">7.1 添加账户<a class="headerlink" href="#71" title="Permanent link">&para;</a></h3>
 <ul>
-<li>录入时必选平台类型（§5.2 六值枚举）与对应凭据字段；提交不支持的类型或
+<li>录入时必选平台类型（§5.2 七值枚举）与对应凭据字段；提交不支持的类型或
   缺失必填字段时拒绝保存并给出明确错误提示。</li>
 <li>保存成功后账户出现在账户列表中；保存前应对凭据做连通性验证（§7.3）。</li>
 </ul>
@@ -1718,14 +1728,17 @@
 <li>TTL 在 1–86400 秒之间；</li>
 <li>权重（weight）非空时在 -1~100 之间，优先级（priority）非空时在 0~50 之间。</li>
 </ul>
+<p>火山引擎域名的记录备注受平台长度限制校验，超长拒绝且不调用平台接口；
+解析线路未提交时按 <code>default</code> 回写。</p>
 <h3 id="92">9.2 修改<a class="headerlink" href="#92" title="Permanent link">&para;</a></h3>
 <p>修改已有记录的主机记录、类型、记录值、TTL、权重、优先级等字段；修改 MUST
 回写到平台同一条记录。平台侧记录已不存在时返回失败并提示，本地记录标记
-待同步。</p>
+待同步。火山引擎更新接口要求主机记录与线路为必填项，未变更时仍以当前值
+回填这两项。</p>
 <h3 id="93">9.3 启用/停用<a class="headerlink" href="#93" title="Permanent link">&para;</a></h3>
 <p>对一条记录启用/停用，映射为对应平台操作（阿里云启停、DNSPod 启停、EdgeOne
-<code>ModifyDnsRecordsStatus</code>）；平台不支持时返回明确的不支持提示。操作后本地
-状态同步更新。</p>
+<code>ModifyDnsRecordsStatus</code>、火山引擎 <code>UpdateRecordStatus</code>）；平台不支持时返回
+明确的不支持提示。操作后本地状态同步更新。</p>
 <h3 id="94">9.4 删除<a class="headerlink" href="#94" title="Permanent link">&para;</a></h3>
 <p>删除解析记录回写平台侧并移除本地记录；删除前要求确认，取消确认则两侧均
 保持不变。</p>
@@ -2016,8 +2029,9 @@
   平台展示：EdgeOne（国内/国际站）不展示「解析线路」列与输入项，改为展示
   「权重」「优先级」列（无值显示空占位），创建/修改表单仅对 EdgeOne 提供权重
   （A/AAAA/CNAME）与优先级（MX）输入，留空表示使用平台默认值（编辑时权重
-  留空提交 <code>-1</code>、优先级留空提交 <code>0</code>）；其他平台保持线路与 CloudFlare 代理的
-  既有展示。</li>
+  留空提交 <code>-1</code>、优先级留空提交 <code>0</code>）；火山引擎保持「解析线路」展示（展示
+  平台返回值，默认 <code>default</code>），不展示权重与优先级；其他平台保持线路与
+  CloudFlare 代理的既有展示。</li>
 </ul>
 <p>通用界面行为：</p>
 <ul>

@@ -732,14 +732,22 @@
 <h2 id="_4">命令行用法<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>unidns<span class="w">              </span><span class="c1"># 不带子命令：加载配置并启动 Web 服务（与既有部署脚本兼容）</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>unidns<span class="w"> </span>init<span class="w">         </span><span class="c1"># 生成示例 config.toml（遵循 UNIDNS_CONFIG，已存在则不覆盖）</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>unidns<span class="w"> </span>version<span class="w">      </span><span class="c1"># 打印版本号（单行）</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>unidns<span class="w"> </span><span class="nb">help</span><span class="w">         </span><span class="c1"># 打印帮助（-h / --help 等价）</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>unidns<span class="w"> </span>reset-password<span class="w">  </span><span class="c1"># 强制重置管理员口令（忘记口令时使用，跳过旧口令校验）</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>unidns<span class="w"> </span>version<span class="w">      </span><span class="c1"># 打印版本号（单行）</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>unidns<span class="w"> </span><span class="nb">help</span><span class="w">         </span><span class="c1"># 打印帮助（-h / --help 等价）</span>
 </span></code></pre></div>
 <p><code>init</code> 的目标路径与启动时读取的配置路径同源：默认当前目录的 <code>config.toml</code>，
 设置 <code>UNIDNS_CONFIG</code> 时指向该路径（父目录不存在会自动创建）。目标文件已存在时
 不会覆盖，直接以退出码 <code>2</code> 结束，避免误删已调优的配置。</p>
-<p>成功时退出码 <code>0</code>；<code>init</code> 目标已存在、未知子命令或非法标志时退出码 <code>2</code>，
-未知子命令还会把帮助信息打印到标准错误，且不会启动服务。</p>
+<p><code>reset-password</code> 是忘记口令时的运维通道：连接配置（<code>UNIDNS_DATA_DIR</code> /
+<code>UNIDNS_CONFIG</code>）指向的数据库，交互式输入新口令后直接覆盖
+<code>admin_password_hash</code>，<strong>不校验旧口令</strong>。已设置口令时给出"将强制覆盖"提示，
+未设置时直接走设置流程。该命令独立于 Web 服务运行，执行前应先停止服务以避免
+写冲突；完成后重启服务即可用新口令登录。此操作不影响已存的账户凭据（凭据用
+<code>master_key</code> 加密，与口令哈希无关），但要求 <code>data/secret.key</code> 仍在。</p>
+<p>成功时退出码 <code>0</code>；<code>init</code> 目标已存在、<code>reset-password</code> 口令不合规/不一致、
+未知子命令或非法标志时退出码 <code>2</code>，未知子命令还会把帮助信息打印到标准错误，
+且不会启动服务。</p>
 <h2 id="_5">首次启动引导<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
 <ol>
 <li>服务启动时自动创建数据目录、迁移数据库；若 <code>config.toml</code> 不存在会生成
