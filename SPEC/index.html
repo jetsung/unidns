@@ -2101,19 +2101,24 @@ HTTPS——Service Worker 仅在 HTTPS 或 localhost 下可用，HTTP 访问时�
 为普通网页（品牌图标与 manifest 不受影响，见 §11.3）。</p>
 <h3 id="122-docker">12.2 Docker<a class="headerlink" href="#122-docker" title="Permanent link">&para;</a></h3>
 <ul>
-<li>多阶段构建：前端构建（Node/pnpm，产物为静态站点）→ 静态编译（musl 静态
-  链接，无 glibc 依赖）→ 运行阶段使用 distroless static、非 root（uid 65532），
-  出站 HTTPS 根证书由基础镜像自带。全程 rustls、无 OpenSSL。</li>
-<li>提供两份等价 Dockerfile：官方源版与国内镜像源版，仅镜像源配置不同。</li>
+<li>发行镜像：<code>ghcr.io/jetsung/unidns:latest</code>（多架构 amd64/arm64，随版本
+  标签发布），可直接拉取运行，无需本地构建。</li>
+<li>源码构建：多阶段构建，前端构建（Node/pnpm，产物为静态站点）→ 静态编译
+  （musl 静态链接，无 glibc 依赖）→ 运行阶段使用 distroless static、非 root
+  （uid 65532），出站 HTTPS 根证书由基础镜像自带。全程 rustls、无 OpenSSL。
+  提供两份等价 Dockerfile：官方源版与国内镜像源版，仅镜像源配置不同。</li>
 <li>运行阶段 <strong>不注入 <code>UNIDNS_LISTEN</code> / <code>UNIDNS_DATA_DIR</code></strong>：监听用默认
   <code>0.0.0.0:18686</code>，数据目录用默认工作目录下的 <code>./data</code>。工作目录为 <code>/app</code>
   且属主为运行用户，数据落在 <code>/app/data</code>；<code>EXPOSE 18686</code>，
   <code>VOLUME /app/data</code>。</li>
-<li>docker run 方式：构建后 <code>-p 18686:18686 -v &lt;主机目录&gt;:/app/data</code> 运行；
-  主机目录需对 uid 65532 可写。</li>
-<li>docker compose 方式：端口映射 <code>18686:18686</code>，挂载 <code>../data:/app/data</code>，
-  <code>restart: unless-stopped</code>；可选环境变量 <code>UNIDNS_MASTER_KEY</code>、
-  <code>UNIDNS_ADMIN_PASSWORD</code>、<code>UNIDNS_SYNC_INTERVAL</code>、<code>UNIDNS_LOG</code>。</li>
+<li>docker run 方式：<code>-p 18686:18686 -v &lt;主机目录&gt;:/app/data</code> 运行；
+  主机目录需归属 uid 65532（<code>chown -R 65532:65532 ./data</code>）。</li>
+<li>docker compose 方式（推荐）：使用 <code>image: ghcr.io/jetsung/unidns:latest</code>，
+  端口映射 <code>18686:18686</code>，挂载 <code>./data:/app/data</code>，
+  <code>restart: unless-stopped</code>；可选 <code>env_file: ./.env</code>（<code>required: false</code>，
+  需 Compose v2.24+）注入 <code>UNIDNS_MASTER_KEY</code>、<code>UNIDNS_ADMIN_PASSWORD</code>、
+  <code>UNIDNS_SYNC_INTERVAL</code>、<code>UNIDNS_LOG</code>。使用本地构建镜像的 compose 见
+  <code>docker/compose.yaml</code>（<code>unidns:dev</code>）。</li>
 </ul>
 <h3 id="123">12.3 前端开发模式<a class="headerlink" href="#123" title="Permanent link">&para;</a></h3>
 <p>前端为静态站点构建产物；开发时开发服务器将 <code>/api</code> 代理到本地 <code>18686</code>
