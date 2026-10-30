@@ -693,12 +693,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_preserves_local_remark() {
+    async fn sync_remark_follows_provider_capability() {
         let (state, mocks) = test_app_with_multi_mock().await;
         let mock_a = mocks.get("a").unwrap().clone();
         {
             let mut guard = mock_a.state.lock().await;
-            // rec-1 无平台备注（模拟 EdgeOne/CloudFlare 的 None 场景），rec-2 带平台备注「演示备注」
+            // rec-1 无平台备注，rec-2 带平台备注「演示备注」
             *guard = MockState::default().with_zone("remark.com");
         }
         let app = router(state.clone());
@@ -754,7 +754,7 @@ mod tests {
         let run_id = body_json(res).await["run_id"].as_i64().unwrap();
         assert_eq!(wait_run_done(&state, run_id).await, "success");
 
-        // 本地非空备注不被平台覆盖；本地空备注记录重新采用平台值
+        // 支持备注的平台：以上游为准（含平台侧改动/清空）
         let remarks: Vec<String> = sqlx::query_scalar(
             "SELECT remark FROM records WHERE domain_id = (SELECT id FROM domains WHERE name = 'remark.com') ORDER BY provider_record_id",
         )
@@ -762,8 +762,37 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(remarks.len(), 2);
-        assert_eq!(remarks[0], "本地保护备注", "本地非空备注不得被平台覆盖");
-        assert_eq!(remarks[1], "平台已改动", "本地空备注记录应重新采用平台值");
+        assert_eq!(remarks[0], "平台已改动", "支持备注的平台应以上游为准");
+        assert_eq!(remarks[1], "平台已改动", "平台改动应同步到本地");
+
+        // 不支持备注的平台：保留本地备注，不被上游空值覆盖
+        mock_a.disable_record_remark();
+        sqlx::query("UPDATE records SET remark = '本地保护备注' WHERE provider_record_id = 'rec-remark.com-1'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        {
+            let mut guard = mock_a.state.lock().await;
+            let list = guard.records.get_mut("remark.com").unwrap();
+            list[0].remark = None;
+        }
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        let run_id = body_json(res).await["run_id"].as_i64().unwrap();
+        assert_eq!(wait_run_done(&state, run_id).await, "success");
+        let r1: String = sqlx::query_scalar(
+            "SELECT remark FROM records WHERE provider_record_id = 'rec-remark.com-1'",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(r1, "本地保护备注", "上游无备注字段时应保留本地备注");
     }
 
     #[tokio::test]

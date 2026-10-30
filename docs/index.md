@@ -30,5 +30,6 @@ Astro 构建的静态站点（编译期经 rust-embed 嵌入二进制），单�
 | 尽快跑起来 | [快速开始](02-getting-started.md) |
 | 配置监听/数据目录/密钥 | [配置参考](03-configuration.md) |
 | 添加各平台账户与凭据格式 | [DNS 提供商](04-providers.md) |
+| 查看上游平台接口、签名与字段映射 | [上游平台 API](API.md) |
 | 二次开发或对接 API | [REST API](05-api.md) / [本地开发](06-development.md) |
 | 了解代码结构 | [架构设计](01-architecture.md) |

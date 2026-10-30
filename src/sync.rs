@@ -137,6 +137,24 @@ async fn reconcile(
     }
 
     // --- 记录对账 ---
+    // 支持备注的平台以上游为准（含清空）；不支持备注的平台保留本地备注
+    let remark_update = if provider.supports_record_remark() {
+        "excluded.remark"
+    } else {
+        "CASE WHEN records.remark IS NOT NULL AND records.remark != '' \
+         THEN records.remark ELSE excluded.remark END"
+    };
+    let record_upsert = format!(
+        "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at, weight, priority) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) \
+         ON CONFLICT(domain_id, provider_record_id) DO UPDATE SET \
+            host = excluded.host, rtype = excluded.rtype, value = excluded.value, \
+            ttl = excluded.ttl, line = excluded.line, proxied = excluded.proxied, \
+            status = excluded.status, pending_sync = 0, \
+            weight = excluded.weight, priority = excluded.priority, \
+            remark = {remark_update}, \
+            synced_at = excluded.synced_at"
+    );
     let mut total_records = 0usize;
     let mut skipped: Vec<(String, String)> = Vec::new();
     for (domain_name, domain_db_id) in &domain_db_ids {
@@ -164,38 +182,27 @@ async fn reconcile(
         let mut platform_ids: HashSet<String> = HashSet::new();
         for r in &records {
             platform_ids.insert(r.provider_record_id.clone());
-            sqlx::query(
-                "INSERT INTO records (domain_id, account_id, provider_record_id, host, rtype, value, ttl, line, proxied, status, pending_sync, remark, synced_at, weight, priority) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) \
-                 ON CONFLICT(domain_id, provider_record_id) DO UPDATE SET \
-                    host = excluded.host, rtype = excluded.rtype, value = excluded.value, \
-                    ttl = excluded.ttl, line = excluded.line, proxied = excluded.proxied, \
-                    status = excluded.status, pending_sync = 0, \
-                    weight = excluded.weight, priority = excluded.priority, \
-                    remark = CASE WHEN records.remark IS NOT NULL AND records.remark != '' \
-                                  THEN records.remark ELSE excluded.remark END, \
-                    synced_at = excluded.synced_at",
-            )
-            .bind(domain_db_id)
-            .bind(account_id)
-            .bind(&r.provider_record_id)
-            .bind(&r.host)
-            .bind(&r.rtype)
-            .bind(&r.value)
-            .bind(r.ttl as i64)
-            .bind(r.line.clone().unwrap_or_default())
-            .bind(r.proxied.map(|p| p as i64))
-            .bind(if r.enabled { "enabled" } else { "disabled" })
-            .bind(r.remark.clone().unwrap_or_default())
-            .bind(&now)
-            .bind(r.weight)
-            .bind(r.priority)
-            .execute(pool)
-            .await
-            .map_err(|e| ProviderError::Api {
-                code: "LocalDb".into(),
-                message: format!("写入记录失败: {e}"),
-            })?;
+            sqlx::query(&record_upsert)
+                .bind(domain_db_id)
+                .bind(account_id)
+                .bind(&r.provider_record_id)
+                .bind(&r.host)
+                .bind(&r.rtype)
+                .bind(&r.value)
+                .bind(r.ttl as i64)
+                .bind(r.line.clone().unwrap_or_default())
+                .bind(r.proxied.map(|p| p as i64))
+                .bind(if r.enabled { "enabled" } else { "disabled" })
+                .bind(r.remark.clone().unwrap_or_default())
+                .bind(&now)
+                .bind(r.weight)
+                .bind(r.priority)
+                .execute(pool)
+                .await
+                .map_err(|e| ProviderError::Api {
+                    code: "LocalDb".into(),
+                    message: format!("写入记录失败: {e}"),
+                })?;
         }
         let local_ids: Vec<(i64, String)> =
             sqlx::query_as("SELECT id, provider_record_id FROM records WHERE domain_id = ?")
@@ -532,5 +539,112 @@ mod tests {
         .await;
         assert_eq!(r.unwrap(), 42);
         assert_eq!(attempts.get(), 2, "限流应且仅应重试一次");
+    }
+
+    async fn insert_test_account(pool: &SqlitePool, provider_type: &str) -> i64 {
+        sqlx::query(
+            "INSERT INTO accounts (name, provider_type, credentials_enc, credentials_mask, status, created_at, updated_at) \
+             VALUES ('测试账户', ?, X'', '', 'enabled', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(provider_type)
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    async fn remark_of(pool: &SqlitePool, provider_record_id: &str) -> String {
+        sqlx::query_scalar("SELECT remark FROM records WHERE provider_record_id = ?")
+            .bind(provider_record_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// 支持备注的平台以上游为准（含清空）；不支持备注的平台保留本地备注。
+    #[tokio::test]
+    async fn sync_remark_follows_provider_capability() {
+        use crate::providers::mock::MockState;
+
+        // 支持备注的平台
+        let (state, mock) = crate::web::test_app_with_mock().await;
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let account_id = insert_test_account(&state.pool, "volcengine").await;
+        let domains = mock.list_domains().await.unwrap();
+        reconcile(&state.pool, account_id, &mock, domains)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "UPDATE records SET remark = '本地保护' WHERE provider_record_id = 'rec-example.com-1'",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        {
+            let mut guard = mock.state.lock().await;
+            let records = guard.records.get_mut("example.com").unwrap();
+            // rec-1 平台侧清空（None），rec-2 平台侧改为「平台值」
+            records[1].remark = Some("平台值".into());
+        }
+        let domains = mock.list_domains().await.unwrap();
+        reconcile(&state.pool, account_id, &mock, domains)
+            .await
+            .unwrap();
+        assert_eq!(
+            remark_of(&state.pool, "rec-example.com-1").await,
+            "",
+            "支持备注的平台应以上游为准（含清空）"
+        );
+        assert_eq!(remark_of(&state.pool, "rec-example.com-2").await, "平台值");
+
+        // 不支持备注的平台（EdgeOne 场景）
+        let (state, mock) = crate::web::test_app_with_mock().await;
+        mock.disable_record_remark();
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let account_id = insert_test_account(&state.pool, "edgeone_intl").await;
+        let domains = mock.list_domains().await.unwrap();
+        reconcile(&state.pool, account_id, &mock, domains)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "UPDATE records SET remark = '本地保护' WHERE provider_record_id = 'rec-example.com-1'",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE records SET remark = '旧本地' WHERE provider_record_id = 'rec-example.com-2'",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        {
+            let mut guard = mock.state.lock().await;
+            let records = guard.records.get_mut("example.com").unwrap();
+            records[0].remark = None;
+            records[1].remark = Some("平台值".into());
+        }
+        let domains = mock.list_domains().await.unwrap();
+        reconcile(&state.pool, account_id, &mock, domains)
+            .await
+            .unwrap();
+        assert_eq!(
+            remark_of(&state.pool, "rec-example.com-1").await,
+            "本地保护",
+            "不支持备注的平台应保留本地备注"
+        );
+        assert_eq!(
+            remark_of(&state.pool, "rec-example.com-2").await,
+            "旧本地",
+            "不支持备注的平台不应被上游值覆盖"
+        );
     }
 }

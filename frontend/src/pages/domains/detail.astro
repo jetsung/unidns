@@ -197,9 +197,10 @@ import AppLayout from '../../components/AppLayout.astro';
              </div>
              <div class="hint">权重仅适用于 A/AAAA/CNAME，同一主机记录的记录需统一设置权重；优先级仅适用于 MX</div>`
           : `<div class="field"><label>解析线路</label><input name="line" value="${esc(f.line || '')}" placeholder="留空为默认线路" /></div>`}
-        ${domain.provider_type !== 'edgeone' && domain.provider_type !== 'edgeone_intl'
-          ? `<div class="field"><label>备注</label><input name="remark" value="${esc(f.remark || '')}" placeholder="选填；清空并保存可删除备注" /></div>`
-          : ''}
+        <div class="field">
+          <label>备注</label>
+          <input name="remark" value="${esc(f.remark || '')}" placeholder="${isEdgeone ? '选填；仅本地保存，不同步平台' : '选填；清空并保存可删除备注'}" />
+        </div>
       `, `
         <button class="btn" data-close>取消</button>
         <button class="btn primary" id="save-record">${isEdit ? '保存修改' : '创建并回写平台'}</button>

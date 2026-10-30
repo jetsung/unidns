@@ -23,6 +23,7 @@ nav = [
   { "快速开始" = "02-getting-started.md" },
   { "配置参考" = "03-configuration.md" },
   { "DNS 提供商" = "04-providers.md" },
+  { "上游平台 API" = "API.md" },
   { "REST API" = "05-api.md" },
   { "本地开发" = "06-development.md" },
 ]

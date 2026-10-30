@@ -147,8 +147,12 @@ delete_record(zone, record_id)
 set_record_status(zone, record_id, enabled)
 set_record_remark(zone, record_id, remark)
 set_domain_remark(zone, remark)
+supports_record_remark() -> bool                  // 上游是否提供有效记录备注字段
 ```
 
+- 记录备注能力通过适配器能力标识 `supports_record_remark` 声明：阿里云、
+  DNSPod 国内站、DNSPod 国际站、CloudFlare、火山引擎支持将设置、修改与清空备注回写上游；
+  EdgeOne 无有效上游备注字段，记录备注仅保存在本地。
 - 凭据以 JSON 字符串传入工厂 `build_provider(平台类型, credentials_json, proxy)`，
   由适配器自行解析；解析失败返回认证错误。
 - 错误类型细分六类，Web 层据此映射 HTTP 状态码：
@@ -181,8 +185,14 @@ set_domain_remark(zone, remark)
 - **连通性验证调用**：阿里云 `DescribeDomains`、DNSPod/EdgeOne
   `DescribeZoneList`、CloudFlare `GET /zones`、火山引擎 `ListZones`；失败
   提示透传平台原始错误码与消息。
-- **能力差异**：所有平台均支持验证、域名列表、记录增删改查、启用/停用、
-  记录与域名备注；个别平台备注能力受上游 API 限制，调用不支持的平台返回
+- **能力差异**：所有平台均支持验证、域名列表、记录增删改查与启用/停用。记录
+  备注能力按平台而异——阿里云、DNSPod 国内站、DNSPod 国际站、CloudFlare、火山引擎
+  支持回写（阿里云通过 `UpdateDomainRecordRemark`，DNSPod 国内站随
+  `CreateRecord`/`ModifyRecord` 的 `Remark`，DNSPod 国际站在创建/修改后调用
+  `ModifyRecordRemark`，CloudFlare 使用 `comment`，火山
+  引擎使用 `Remark` 且上限 16 字符，空串表示清除）；EdgeOne
+  无有效记录备注字段，记录备注仅本地保存。域名备注由阿里云、DNSPod（国内/国际
+  站）与火山引擎回写上游，其余平台仅本地保存。平台不支持的其它能力调用返回
   `Unsupported`（HTTP 409，错误码 `provider_unsupported`）。
 - EdgeOne 的记录启停对应其 `ModifyDnsRecordsStatus` 接口。
 - 域名级同步开关存储于本地 `settings` 表：关闭的域名不参与同步，其本地备注
@@ -217,7 +227,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 | provider_domain_id | TEXT | 非空默认 `''`，上游平台域名标识 |
 | status | TEXT | 非空默认 `''`，平台侧状态 |
 | synced_at | TEXT | 非空，最近同步时间 |
-| remark | TEXT | 非空默认 `''`，本地备注（不回写平台） |
+| remark | TEXT | 非空默认 `''`，域名备注；阿里云、DNSPod（国内/国际站）、火山引擎回写上游，其余平台仅本地保存 |
 
 **records（解析记录）**
 
@@ -236,7 +246,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 | status | TEXT | 非空默认 `enabled`，启用/停用 |
 | pending_sync | INTEGER | 非空默认 0，待同步标记 |
 | synced_at | TEXT | 非空 |
-| remark | TEXT | 非空默认 `''`，本地备注 |
+| remark | TEXT | 非空默认 `''`，记录备注；支持备注的平台随写操作回写上游，EdgeOne 仅本地保存 |
 | weight | INTEGER | 可空，权重（EdgeOne 适用，-1~100；-1 视为未设置存空） |
 | priority | INTEGER | 可空，优先级（EdgeOne MX 适用，0~50；0 视为未设置存空） |
 
@@ -295,6 +305,9 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
   不残留孤儿记录；记录归属域名与账户）。
 - EdgeOne 权重/优先级随同步落库：权重 `-1`、优先级 `0` 视为未设置（本地为空），
   其余值原样保存；EdgeOne 解析线路不作为本地线路字段保存（本地为空）。
+- 记录备注随同步按平台能力处理：上游支持记录备注的平台（阿里云、DNSPod 国内站、
+  DNSPod 国际站、CloudFlare、火山引擎）本地备注以上游返回值为准（含平台侧清空）；
+  EdgeOne 无有效上游备注字段，同步保留本地备注，不因上游空值清空。
 - 支持全量同步：一次触发对所有已启用账户执行；单个账户失败不中断其他账户，
   失败账户在结果中标记。
 
@@ -337,7 +350,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 ### 9.1 创建
 
 在指定域名下创建解析记录（主机记录、类型、记录值、TTL、线路/代理状态、
-权重、优先级等按平台适用的字段）；创建成功 MUST 同步写往对应平台，并保存
+权重、优先级、备注等按平台适用的字段）；创建成功 MUST 同步写往对应平台，并保存
 平台返回的记录标识。参数无效时拒绝创建并返回具体字段错误，**不调用平台
 接口**。本地校验规则：
 
@@ -345,15 +358,20 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 - 记录类型限定八种：`A`、`AAAA`、`CNAME`、`MX`、`TXT`、`NS`、`SRV`、`CAA`；
 - 记录值（value）非空；
 - TTL 在 1–86400 秒之间；
-- 权重（weight）非空时在 -1~100 之间，优先级（priority）非空时在 0~50 之间。
+- 权重（weight）非空时在 -1~100 之间，优先级（priority）非空时在 0~50 之间；
+- 备注（remark）对所有平台可提交：上游支持记录备注的平台在创建流程中回写（阿里云、
+  DNSPod 国际站在记录创建后调用独立备注接口），EdgeOne 仅保存在本地，不因平台
+  忽略备注而拒绝或丢失。
 
 火山引擎域名的记录备注受平台长度限制校验，超长拒绝且不调用平台接口；
 解析线路未提交时按 `default` 回写。
 
 ### 9.2 修改
 
-修改已有记录的主机记录、类型、记录值、TTL、权重、优先级等字段；修改 MUST
-回写到平台同一条记录。平台侧记录已不存在时返回失败并提示，本地记录标记
+修改已有记录的主机记录、类型、记录值、TTL、权重、优先级、备注等字段；修改 MUST
+回写到平台同一条记录。上游支持记录备注的平台，设置、修改与清空备注 MUST 回写
+上游；EdgeOne 无有效上游备注字段，备注仅更新本地，且不因修改
+其他字段而丢失。平台侧记录已不存在时返回失败并提示，本地记录标记
 待同步。火山引擎更新接口要求主机记录与线路为必填项，未变更时仍以当前值
 回填这两项。
 
@@ -377,7 +395,8 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 ### 9.6 查询与过滤
 
 支持按域名、所属平台/账户、记录类型、启用状态与关键字过滤解析记录，供
-控制台域名详情页使用；本地备注仅存本地（`remark`，不回写平台）。
+控制台域名详情页使用；记录备注按平台能力回写上游（见 §5.3），EdgeOne
+的备注仅保存在本地。
 
 ### 9.7 权重与优先级
 
@@ -459,7 +478,7 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
 |---|---|---|
 | GET | `/domains?page=&page_size=&search=&account_id=&keyword=&provider=` | 分页域名列表（含账户名与平台名、记录数量） |
 | GET | `/domains/{id}` | 域名详情 |
-| PATCH | `/domains/{id}` | 更新本地备注（不回写平台） |
+| PATCH | `/domains/{id}` | 更新域名备注（支持平台回写上游，其余仅本地） |
 | GET | `/domains/{id}/records?page=&page_size=&...` | 记录分页列表（搜索/类型/状态过滤） |
 | POST | `/domains/{id}/records` | 新建记录（回写平台） |
 | PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied/weight/priority） |
@@ -504,7 +523,10 @@ SQLite（WAL 模式、外键开启、忙等待）。五张表，语义如下（�
   （A/AAAA/CNAME）与优先级（MX）输入，留空表示使用平台默认值（编辑时权重
   留空提交 `-1`、优先级留空提交 `0`）；火山引擎保持「解析线路」展示（展示
   平台返回值，默认 `default`），不展示权重与优先级；其他平台保持线路与
-  CloudFlare 代理的既有展示。
+  CloudFlare 代理的既有展示。创建/修改表单对所有平台提供「备注」输入（选填，
+  清空并保存表示删除备注）：EdgeOne 提示仅本地保存、不同步
+  平台，其余平台随保存回写上游；记录表格在记录值下方展示非空备注，备注为空
+  时不展示占位内容。
 
 通用界面行为：
 
