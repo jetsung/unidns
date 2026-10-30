@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: unidns API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     unidns 自托管多平台域名解析集中管理服务 REST API。
 
