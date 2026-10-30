@@ -1,6 +1,6 @@
 [package]
 name = "unidns"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "自托管的多平台（阿里云 / 腾讯云 DNSPod / CloudFlare）域名解析集中管理服务"
 license = "Apache-2.0"
