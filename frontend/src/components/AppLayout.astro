@@ -38,17 +38,20 @@ const current = Astro.url.pathname;
           </a>
         </nav>
         <div class="spacer"></div>
-        <div class="side-footer">
-          <button class="btn ghost small" id="logout-btn" style="color:#9ca3af">登出</button>
+        <div class="side-actions">
+          <button class="btn ghost small side-logout" id="logout-btn" title="登出">
+            <svg class="logout-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+            <span class="label">登出</span>
+          </button>
+          <button class="sidebar-toggle" id="sidebar-toggle" title="折叠/展开侧边栏">
+            <svg class="ico-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+            <svg class="ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
         </div>
-        <div class="side-copy">© 2026 UniDNS · <a href="https://github.com/jetsung/unidns" target="_blank" rel="noopener noreferrer">GitHub</a></div>
-        <button class="sidebar-toggle" id="sidebar-toggle" title="折叠/展开侧边栏">
-          <svg class="ico-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
-          <svg class="ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
       </aside>
-      <main class="content" id="app">
-        <div class="loading">加载中…</div>
+      <main class="content">
+        <div id="app"><div class="loading">加载中…</div></div>
+        <div class="app-footer">© 2026 UniDNS · <a href="https://github.com/jetsung/unidns" target="_blank" rel="noopener noreferrer">GitHub</a></div>
       </main>
     </div>
     <script>
@@ -56,7 +59,16 @@ const current = Astro.url.pathname;
 
       // 软导航：模块只执行一次，监听 astro:page-load 在每次换页后重挂事件
       document.addEventListener('astro:page-load', () => {
-        document.getElementById('logout-btn')?.addEventListener('click', logout);
+        // 登出按钮位于侧边栏底栏（软导航时随侧边栏重建），用 document 级委托并只绑定一次
+        if (!document.body.dataset.logoutBound) {
+          document.body.dataset.logoutBound = '1';
+          document.addEventListener('click', (e) => {
+            const btn = e.target.closest('#logout-btn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            logout();
+          });
+        }
 
         // 侧边栏折叠：localStorage 记忆，仅桌面端生效；箭头方向由 collapsed 类驱动
         const shell = document.getElementById('app-shell');

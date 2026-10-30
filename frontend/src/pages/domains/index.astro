@@ -62,13 +62,13 @@ import AppLayout from '../../components/AppLayout.astro';
       }
       const rows = sorted.map((d) => `
                 <tr>
-                  <td><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a><button class="copy-btn" data-copy="${esc(d.name)}" title="复制域名" aria-label="复制域名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></td>
-                  <td><span class="badge provider">${esc(PROVIDER_LABELS[d.provider_type] || d.provider_type)}</span></td>
-                  <td>${esc(d.account_name)}</td>
-                  <td>${d.record_count}</td>
-                  <td>${zoneStatusBadge(d.status)}</td>
-                  <td class="muted">${d.remark ? esc(d.remark) : '—'}</td>
-                  <td class="muted">${esc(fmtTime(d.synced_at))}</td>
+                  <td data-label="域名"><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a><button class="copy-btn" data-copy="${esc(d.name)}" title="复制域名" aria-label="复制域名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></td>
+                  <td data-label="所属平台"><span class="badge provider">${esc(PROVIDER_LABELS[d.provider_type] || d.provider_type)}</span></td>
+                  <td data-label="账户">${esc(d.account_name)}</td>
+                  <td data-label="记录数">${d.record_count}</td>
+                  <td data-label="状态">${zoneStatusBadge(d.status)}</td>
+                  <td class="muted" data-label="备注">${d.remark ? esc(d.remark) : '—'}</td>
+                  <td class="muted" data-label="同步时间">${esc(fmtTime(d.synced_at))}</td>
                   <td class="actions">
                     <a class="link-op" href="/domains/detail?id=${d.id}">解析</a>
                     <a class="link-op" href="javascript:void(0)" data-remark="${d.id}" data-name="${esc(d.name)}" data-remark-val="${esc(d.remark || '')}">备注</a>

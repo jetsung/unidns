@@ -95,6 +95,31 @@ export async function copyText(text) {
 
 // ---------- Modal ----------
 
+let scrollLocked = false;
+let savedBodyPaddingRight = "";
+
+// 弹窗打开期间锁定背景滚动；补偿滚动条宽度避免桌面端内容横向跳动
+function lockBackgroundScroll() {
+  if (scrollLocked) return;
+  scrollLocked = true;
+  const scrollbarGap = window.innerWidth - document.documentElement.clientWidth;
+  savedBodyPaddingRight = document.body.style.paddingRight;
+  if (scrollbarGap > 0) document.body.style.paddingRight = `${scrollbarGap}px`;
+  document.body.style.overflow = "hidden";
+}
+
+function unlockBackgroundScroll() {
+  if (!scrollLocked) return;
+  scrollLocked = false;
+  document.body.style.overflow = "";
+  document.body.style.paddingRight = savedBodyPaddingRight;
+}
+
+// 弹窗可能通过底部按钮、遮罩、ESC 或直接 remove() 关闭，统一在最后一个弹窗移除后解锁
+new MutationObserver(() => {
+  if (!document.querySelector(".modal-mask")) unlockBackgroundScroll();
+}).observe(document.body, { childList: true });
+
 /**
  * 打开弹窗。content 为 HTML 字符串；返回 mask 元素。
  * modal({ title, body, footer }) 结构化为 .modal-header/.modal-body/.modal-footer。
@@ -105,15 +130,16 @@ export function modal(html) {
   mask.innerHTML = `<div class="modal">${html}</div>`;
   mask.addEventListener("click", (e) => { if (e.target === mask) mask.remove(); });
   document.body.appendChild(mask);
+  lockBackgroundScroll();
   const firstInput = mask.querySelector("input, select");
   if (firstInput) setTimeout(() => firstInput.focus(), 50);
   return mask;
 }
 
-export function modalFrame(title, bodyHtml, footerHtml = "") {
+export function modalFrame(title, bodyHtml, footerHtml = "", showClose = true) {
   return modal(`
     <div class="modal-header"><h2>${esc(title)}</h2>
-      <button class="btn ghost small" data-close aria-label="关闭">✕</button></div>
+      ${showClose ? '<button class="btn ghost small" data-close aria-label="关闭">✕</button>' : ""}</div>
     <div class="modal-body">${bodyHtml}</div>
     ${footerHtml ? `<div class="modal-footer">${footerHtml}</div>` : ""}
   `);

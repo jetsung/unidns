@@ -46,12 +46,12 @@ import AppLayout from '../components/AppLayout.astro';
 
       const rows = items.map((a) => `
                 <tr>
-                  <td><span class="badge provider">${esc(a.provider_name)}</span></td>
-                  <td><b>${esc(a.name)}</b></td>
-                  <td class="mono muted">${esc(a.credentials_mask)}</td>
-                  <td>${a.status === 'enabled' ? '<span class="badge ok"><span class="dot"></span>启用</span>' : '<span class="badge warn"><span class="dot"></span>停用</span>'}</td>
-                  <td>${verifyTag(a)}<div class="sub">${esc(fmtTime(a.last_verified_at))}</div></td>
-                  <td>${syncTag(a)}<div class="sub">${esc(fmtTime(a.last_sync_at))}</div></td>
+                  <td data-label="平台"><span class="badge provider">${esc(a.provider_name)}</span></td>
+                  <td data-label="名称"><b>${esc(a.name)}</b></td>
+                  <td class="mono muted" data-label="凭据">${esc(a.credentials_mask)}</td>
+                  <td data-label="状态">${a.status === 'enabled' ? '<span class="badge ok"><span class="dot"></span>启用</span>' : '<span class="badge warn"><span class="dot"></span>停用</span>'}</td>
+                  <td data-label="连通性">${verifyTag(a)}<div class="sub">${esc(fmtTime(a.last_verified_at))}</div></td>
+                  <td data-label="最近同步">${syncTag(a)}<div class="sub">${esc(fmtTime(a.last_sync_at))}</div></td>
                   <td class="actions" style="text-align:right">
                     <button class="btn small" data-act="verify" data-id="${a.id}">验证</button>
                     <button class="btn small" data-act="sync" data-id="${a.id}">同步</button>
@@ -190,7 +190,7 @@ import AppLayout from '../components/AppLayout.astro';
 
     function showSyncRuns(accountId, name) {
       const mask = modalFrame(`同步历史 · ${esc(name)}`, `<div id="runs-body"><div class="loading">加载中…</div></div>`,
-        `<button class="btn" data-close>关闭</button>`);
+        `<button class="btn" data-close>关闭</button>`, false);
       api(`/api/v1/sync/runs?account_id=${accountId}&limit=5`).then(({ items }) => {
         mask.querySelector('#runs-body').innerHTML = items.length === 0
           ? '<div class="empty">暂无同步记录</div>'
