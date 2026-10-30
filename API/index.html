@@ -1,0 +1,2483 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="多平台 DNS 记录统一管理：聚合阿里云/DNSPod/EdgeOne/CloudFlare，一次查看与编辑全部域名记录">
+      
+      
+      
+      
+      
+        <link rel="prev" href="../04-providers/">
+      
+      
+        <link rel="next" href="../05-api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.0.73">
+    
+    
+      
+        <title>上游平台 API - UniDNS</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.4ab2de0c.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        跳转至
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="./.." title="UniDNS" class="md-header__button md-logo" aria-label="UniDNS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">导航栏</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            UniDNS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              上游平台 API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切换到浅色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切换到浅色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切换到深色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切换到深色模式" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切换到跟随系统"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="切换到跟随系统" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">查找</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="查找">
+  <button type="button" class="md-search__button">
+    查找
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/jetsung/unidns" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jetsung/unidns
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="UniDNS" class="md-nav__button md-logo" aria-label="UniDNS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    UniDNS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jetsung/unidns" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jetsung/unidns
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  首页
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  架构设计
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  快速开始
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  配置参考
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  DNS 提供商
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  上游平台 API
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  上游平台 API
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. 平台总览
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. 通用约定
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 通用约定">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.1 统一记录模型与平台字段
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.2 项目侧入参校验
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.3 错误归一化
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. 阿里云云解析 DNS
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 阿里云云解析 DNS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-rpc-pophmac-sha1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.1 签名（RPC POP，HMAC-SHA1）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-dnspod" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. 腾讯云 DNSPod
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 腾讯云 DNSPod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-tc3-hmac-sha256" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.1 签名（TC3-HMAC-SHA256）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-edgeone" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. 腾讯云 EdgeOne
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 腾讯云 EdgeOne">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.1 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.2 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.3 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-cloudflare" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. CloudFlare
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. CloudFlare">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.1 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.2 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.3 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. 火山引擎云解析 DNS
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 火山引擎云解析 DNS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-v4hmac-sha256" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.1 签名（V4，HMAC-SHA256）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. 跨平台能力矩阵
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. 代码索引
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  REST API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  本地开发
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. 平台总览
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. 通用约定
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 通用约定">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.1 统一记录模型与平台字段
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.2 项目侧入参校验
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2.3 错误归一化
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. 阿里云云解析 DNS
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 阿里云云解析 DNS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-rpc-pophmac-sha1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.1 签名（RPC POP，HMAC-SHA1）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-dnspod" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. 腾讯云 DNSPod
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 腾讯云 DNSPod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-tc3-hmac-sha256" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.1 签名（TC3-HMAC-SHA256）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-edgeone" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. 腾讯云 EdgeOne
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 腾讯云 EdgeOne">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.1 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.2 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5.3 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-cloudflare" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. CloudFlare
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. CloudFlare">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.1 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.2 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.3 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. 火山引擎云解析 DNS
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 火山引擎云解析 DNS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-v4hmac-sha256" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.1 签名（V4，HMAC-SHA256）
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.2 使用的接口
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.3 行为说明
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7.4 错误码归一
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. 跨平台能力矩阵
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. 代码索引
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="api">上游平台 API 汇总<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
+<p>本文汇总 UniDNS 实际调用的上游 DNS 平台 OpenAPI：端点、鉴权/签名方式、使用的接口、
+字段映射、能力差异与错误归一化。与 <a href="../05-api/">REST API</a>（UniDNS 自身对外接口）相互独立。</p>
+<p>资料依据：<code>src/providers/*.rs</code> 的实际调用实现（行为以代码为准）。</p>
+<p>所有平台调用均由服务端发起，凭据以 AES-256-GCM 加密落库，不经过前端。
+同步与连通性验证只调用只读接口，记录写操作才会调用平台写接口。</p>
+<h2 id="1">1. 平台总览<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>平台</th>
+<th><code>provider_type</code></th>
+<th>端点</th>
+<th>API 版本</th>
+<th>鉴权 / 签名</th>
+<th>实现文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>阿里云云解析 DNS</td>
+<td><code>aliyun</code></td>
+<td><code>https://alidns.aliyuncs.com</code></td>
+<td><code>2015-01-09</code></td>
+<td>RPC POP 签名：HMAC-SHA1 + RFC3986</td>
+<td><code>src/providers/aliyun.rs</code></td>
+</tr>
+<tr>
+<td>腾讯云 DNSPod（国内站）</td>
+<td><code>dnspod</code></td>
+<td><code>https://dnspod.tencentcloudapi.com</code></td>
+<td><code>2021-03-23</code></td>
+<td>TC3-HMAC-SHA256（<code>service=dnspod</code>）</td>
+<td><code>src/providers/dnspod.rs</code></td>
+</tr>
+<tr>
+<td>腾讯云 DNSPod（国际站）</td>
+<td><code>dnspod_intl</code></td>
+<td><code>https://dnspod.intl.tencentcloudapi.com</code></td>
+<td><code>2021-03-23</code></td>
+<td>同上（密钥体系独立）</td>
+<td><code>src/providers/dnspod.rs</code></td>
+</tr>
+<tr>
+<td>腾讯云 EdgeOne（国内站）</td>
+<td><code>edgeone</code></td>
+<td><code>https://teo.tencentcloudapi.com</code></td>
+<td><code>2022-09-01</code></td>
+<td>TC3-HMAC-SHA256（<code>service=teo</code>）</td>
+<td><code>src/providers/edgeone.rs</code></td>
+</tr>
+<tr>
+<td>腾讯云 EdgeOne（国际站）</td>
+<td><code>edgeone_intl</code></td>
+<td><code>https://teo.intl.tencentcloudapi.com</code></td>
+<td><code>2022-09-01</code></td>
+<td>同上（密钥体系独立）</td>
+<td><code>src/providers/edgeone.rs</code></td>
+</tr>
+<tr>
+<td>CloudFlare</td>
+<td><code>cloudflare</code></td>
+<td><code>https://api.cloudflare.com/client/v4</code></td>
+<td>v4</td>
+<td><code>Authorization: Bearer &lt;api_token&gt;</code></td>
+<td><code>src/providers/cloudflare.rs</code></td>
+</tr>
+<tr>
+<td>火山引擎云解析 DNS</td>
+<td><code>volcengine</code></td>
+<td><code>https://dns.volcengineapi.com</code></td>
+<td><code>2018-08-01</code></td>
+<td>V4 签名：HMAC-SHA256</td>
+<td><code>src/providers/volcengine.rs</code></td>
+</tr>
+</tbody>
+</table>
+<p>调用方向：</p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>使用的上游接口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>账户连通性验证</td>
+<td>阿里云 <code>DescribeDomains</code>；DNSPod <code>DescribeDomainList</code>；EdgeOne <code>DescribeZones</code>；CloudFlare <code>GET /zones</code>；火山引擎 <code>ListZones</code></td>
+</tr>
+<tr>
+<td>同步域名列表</td>
+<td>阿里云 <code>DescribeDomains</code> + <code>DescribeDomainNs</code>；DNSPod <code>DescribeDomainList</code>；EdgeOne <code>DescribeZones</code>；CloudFlare <code>GET /zones</code>；火山引擎 <code>ListZones</code></td>
+</tr>
+<tr>
+<td>同步解析记录</td>
+<td>阿里云 <code>DescribeDomainRecords</code>；DNSPod <code>DescribeRecordList</code>；EdgeOne <code>DescribeDnsRecords</code>；CloudFlare <code>GET /zones/{zone_id}/dns_records</code>；火山引擎 <code>ListRecords</code></td>
+</tr>
+<tr>
+<td>记录增删改 / 启停 / 备注</td>
+<td>各平台对应写接口，见后续章节</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2">2. 通用约定<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<h3 id="21">2.1 统一记录模型与平台字段<a class="headerlink" href="#21" title="Permanent link">&para;</a></h3>
+<p>上层统一使用 <code>ProviderRecord</code>（<code>src/providers/mod.rs</code>），由各适配器完成字段归一。
+主机记录 <code>host</code> 为相对域名的部分，根记录统一为 <code>@</code>；CloudFlare 与 EdgeOne 的记录名
+是 FQDN，由适配器在 <code>@</code> / 相对名与完整域名之间转换。</p>
+<table>
+<thead>
+<tr>
+<th>统一字段</th>
+<th>阿里云</th>
+<th>DNSPod</th>
+<th>EdgeOne</th>
+<th>CloudFlare</th>
+<th>火山引擎</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provider_record_id</code></td>
+<td><code>RecordId</code></td>
+<td><code>RecordId</code></td>
+<td><code>RecordId</code></td>
+<td><code>id</code></td>
+<td><code>RecordID</code></td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td><code>RR</code></td>
+<td><code>Name</code></td>
+<td><code>Name</code>（FQDN，需转换）</td>
+<td><code>name</code>（FQDN，需转换）</td>
+<td><code>Host</code></td>
+</tr>
+<tr>
+<td><code>rtype</code></td>
+<td><code>Type</code></td>
+<td><code>Type</code></td>
+<td><code>Type</code></td>
+<td><code>type</code></td>
+<td><code>Type</code></td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><code>Value</code></td>
+<td><code>Value</code></td>
+<td><code>Content</code></td>
+<td><code>content</code></td>
+<td><code>Value</code></td>
+</tr>
+<tr>
+<td><code>ttl</code></td>
+<td><code>TTL</code></td>
+<td><code>TTL</code></td>
+<td><code>TTL</code></td>
+<td><code>ttl</code></td>
+<td><code>TTL</code></td>
+</tr>
+<tr>
+<td><code>line</code></td>
+<td><code>Line</code></td>
+<td><code>Line</code></td>
+<td>不下发 / 不展示</td>
+<td>无</td>
+<td><code>Line</code></td>
+</tr>
+<tr>
+<td><code>proxied</code></td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+<td><code>proxied</code></td>
+<td>无</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td><code>Status == "Enable"</code></td>
+<td><code>Status == "ENABLE"</code></td>
+<td><code>Status == "enable"</code></td>
+<td>恒为启用</td>
+<td><code>Enable</code></td>
+</tr>
+<tr>
+<td><code>remark</code></td>
+<td><code>Remark</code></td>
+<td><code>Remark</code>（国内站随创建/修改；国际站经 <code>ModifyRecordRemark</code>）</td>
+<td>无（备注仅本地保存）</td>
+<td><code>comment</code></td>
+<td><code>Remark</code></td>
+</tr>
+<tr>
+<td><code>weight</code></td>
+<td>无</td>
+<td>无</td>
+<td><code>Weight</code>（A/AAAA/CNAME）</td>
+<td>无</td>
+<td>无</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td>无</td>
+<td>无</td>
+<td><code>Priority</code>（MX）</td>
+<td>无</td>
+<td>无</td>
+</tr>
+</tbody>
+</table>
+<p>域名（zone）字段映射：</p>
+<table>
+<thead>
+<tr>
+<th>统一字段</th>
+<th>阿里云</th>
+<th>DNSPod</th>
+<th>EdgeOne</th>
+<th>CloudFlare</th>
+<th>火山引擎</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td><code>DomainName</code></td>
+<td><code>Name</code></td>
+<td><code>ZoneName</code></td>
+<td><code>name</code></td>
+<td><code>ZoneName</code></td>
+</tr>
+<tr>
+<td><code>provider_domain_id</code></td>
+<td>空（按域名定位）</td>
+<td><code>DomainId</code>（记录操作按域名定位）</td>
+<td><code>ZoneId</code></td>
+<td><code>id</code></td>
+<td><code>ZID</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>无 <code>Status</code>，按 <code>active</code> 兜底</td>
+<td><code>Status</code></td>
+<td><code>Status</code></td>
+<td><code>status</code>（仅保留 <code>active</code>）</td>
+<td><code>QueryZone.Stage</code> + <code>QueryZone.IsNSCorrect</code>（非 0/NS 不正确/无法确认 → <code>error</code>）</td>
+</tr>
+<tr>
+<td><code>remark</code></td>
+<td><code>Remark</code></td>
+<td><code>Remark</code></td>
+<td>无</td>
+<td>无</td>
+<td><code>Remark</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="22">2.2 项目侧入参校验<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<p>写操作在调用平台前先做本地校验（<code>src/web/records.rs</code>），校验失败不调用上游：</p>
+<ul>
+<li><code>host</code> 非空，根记录使用 <code>@</code>；</li>
+<li>记录类型限定 <code>A</code>、<code>AAAA</code>、<code>CNAME</code>、<code>MX</code>、<code>TXT</code>、<code>NS</code>、<code>SRV</code>、<code>CAA</code>；</li>
+<li><code>value</code> 非空；</li>
+<li><code>ttl</code> 为 1–86400 秒；</li>
+<li><code>weight</code> 非空时 -1~100，<code>priority</code> 非空时 0~50；</li>
+<li>火山引擎记录备注不超过 16 个字符；</li>
+<li>域名备注不超过 500 个字符（阿里云上游另有 50 字符限制）。</li>
+</ul>
+<h3 id="23">2.3 错误归一化<a class="headerlink" href="#23" title="Permanent link">&para;</a></h3>
+<p>各平台原始错误统一映射为 <code>ProviderError</code>（<code>src/providers/mod.rs</code>），Web 层再映射为
+HTTP 状态与错误码：</p>
+<table>
+<thead>
+<tr>
+<th><code>ProviderError</code></th>
+<th>对外 HTTP</th>
+<th>对外错误码</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Auth</code></td>
+<td>400</td>
+<td><code>provider_auth</code></td>
+</tr>
+<tr>
+<td><code>NotFound</code></td>
+<td>404</td>
+<td><code>provider_not_found</code></td>
+</tr>
+<tr>
+<td><code>Unsupported</code></td>
+<td>409</td>
+<td><code>provider_unsupported</code></td>
+</tr>
+<tr>
+<td><code>RateLimited</code></td>
+<td>429</td>
+<td><code>provider_rate_limited</code></td>
+</tr>
+<tr>
+<td><code>Network</code></td>
+<td>502</td>
+<td><code>provider_network</code></td>
+</tr>
+<tr>
+<td><code>Api</code></td>
+<td>502</td>
+<td><code>provider_api</code></td>
+</tr>
+</tbody>
+</table>
+<p>限流时若平台返回 <code>Retry-After</code>（CloudFlare），对外附带建议重试秒数。</p>
+<h2 id="3-dns">3. 阿里云云解析 DNS<a class="headerlink" href="#3-dns" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>端点</strong>：<code>https://alidns.aliyuncs.com</code></li>
+<li><strong>版本</strong>：<code>2015-01-09</code></li>
+<li><strong>请求方式</strong>：全部为 <code>GET</code>，参数放在 query string。</li>
+<li><strong>凭据</strong>：<code>access_key_id</code> + <code>access_key_secret</code>（RAM AccessKey）。</li>
+</ul>
+<h3 id="31-rpc-pophmac-sha1">3.1 签名（RPC POP，HMAC-SHA1）<a class="headerlink" href="#31-rpc-pophmac-sha1" title="Permanent link">&para;</a></h3>
+<p>公共参数：<code>Action</code>、<code>Format=JSON</code>、<code>Version=2015-01-09</code>、<code>AccessKeyId</code>、
+<code>SignatureMethod=HMAC-SHA1</code>、<code>SignatureVersion=1.0</code>、<code>SignatureNonce</code>（16 字节随机 hex）、
+<code>Timestamp</code>（UTC <code>YYYY-MM-DDTHH:MM:SSZ</code>）、<code>Signature</code>。</p>
+<ol>
+<li>参数按参数名排序，键和值分别做 RFC3986 编码（仅保留 <code>A-Za-z0-9-_.~</code>），以 <code>&amp;</code> 连接；</li>
+<li><code>StringToSign = "GET&amp;%2F&amp;" + percentEncode(CanonicalizedQueryString)</code>；</li>
+<li><code>Signature = Base64(HMAC-SHA1(secret + "&amp;", StringToSign))</code>；</li>
+<li>请求 <code>GET {endpoint}/?{canonical query + Signature}</code>。</li>
+</ol>
+<h3 id="32">3.2 使用的接口<a class="headerlink" href="#32" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>用途</th>
+<th>主要请求参数</th>
+<th>关键响应 / 说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DescribeDomains</code></td>
+<td>验证、域名列表</td>
+<td><code>PageNumber</code>、<code>PageSize</code>（100）</td>
+<td><code>Domains.Domain[]</code>：<code>DomainName</code>、<code>Remark</code>；不返回 <code>Status</code>，统一记 <code>active</code></td>
+</tr>
+<tr>
+<td><code>DescribeDomainNs</code></td>
+<td>过滤未托管域名</td>
+<td><code>DomainName</code></td>
+<td><code>AllAliDns</code>：<code>true</code> 表示 NS 全部指向阿里云解析</td>
+</tr>
+<tr>
+<td><code>DescribeDomainRecords</code></td>
+<td>解析记录列表</td>
+<td><code>DomainName</code>、<code>PageNumber</code>、<code>PageSize</code>（100）</td>
+<td><code>DomainRecords.Record[]</code>：<code>RecordId</code>、<code>RR</code>、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Line</code>、<code>Status</code>、<code>Remark</code></td>
+</tr>
+<tr>
+<td><code>AddDomainRecord</code></td>
+<td>创建记录</td>
+<td><code>DomainName</code>、<code>RR</code>、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Line</code>（默认 <code>default</code>）</td>
+<td>返回 <code>RecordId</code>；主接口不支持备注</td>
+</tr>
+<tr>
+<td><code>UpdateDomainRecord</code></td>
+<td>修改记录</td>
+<td><code>RecordId</code>、<code>RR</code>、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Line</code></td>
+<td>主接口不支持备注</td>
+</tr>
+<tr>
+<td><code>UpdateDomainRecordRemark</code></td>
+<td>写记录备注</td>
+<td><code>RecordId</code>、<code>Remark</code></td>
+<td>创建后或每次修改后单独调用，空串清除</td>
+</tr>
+<tr>
+<td><code>DeleteDomainRecord</code></td>
+<td>删除记录</td>
+<td><code>RecordId</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>SetDomainRecordStatus</code></td>
+<td>启用 / 停用</td>
+<td><code>RecordId</code>、<code>Status=Enable/Disable</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>UpdateDomainRemark</code></td>
+<td>写域名备注</td>
+<td><code>DomainName</code>、<code>Remark</code></td>
+<td>空串清除；平台限制 50 字符</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33">3.3 行为说明<a class="headerlink" href="#33" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>list_domains</code> 对 <code>DescribeDomains</code> 返回的每个域名再调用 <code>DescribeDomainNs</code>，
+  仅保留 <code>AllAliDns=true</code> 的域名；NS 探测失败时保守保留。
+  列表接口的 <code>DnsServers</code> 是添加域名时的历史值，注册商改 NS 后不会更新，因此不采用。</li>
+<li>创建记录时若带备注，创建成功后再调用 <code>UpdateDomainRecordRemark</code> 回写。</li>
+<li>修改记录时无论备注是否变化，都会调用一次 <code>UpdateDomainRecordRemark</code>（空串表示清除），
+  保证上游与本地备注一致。</li>
+<li>分页以单页返回条数是否小于 100 判断结束。</li>
+</ul>
+<h3 id="34">3.4 错误码归一<a class="headerlink" href="#34" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>平台错误码</th>
+<th>归一结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InvalidAccessKeyId.NotFound</code>、<code>InvalidAccessKeyId</code>、<code>SignatureDoesNotMatch</code>、<code>Forbidden</code>、<code>Unauthorized</code></td>
+<td><code>Auth</code></td>
+</tr>
+<tr>
+<td><code>Throttling</code>、<code>Throttling.User</code>、<code>Throttling.UserQos</code>、<code>FlowLimitExceeded</code></td>
+<td><code>RateLimited</code></td>
+</tr>
+<tr>
+<td><code>InvalidDomain.NotFound</code>、<code>InvalidRecord.NotFound</code>、<code>DomainNotExists</code></td>
+<td><code>NotFound</code></td>
+</tr>
+<tr>
+<td>其他</td>
+<td><code>Api { code, message }</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-dnspod">4. 腾讯云 DNSPod<a class="headerlink" href="#4-dnspod" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>端点</strong>：国内站 <code>https://dnspod.tencentcloudapi.com</code>，国际站 <code>https://dnspod.intl.tencentcloudapi.com</code></li>
+<li><strong>版本</strong>：<code>2021-03-23</code></li>
+<li><strong>请求方式</strong>：<code>POST {endpoint}/</code>，JSON 请求体。</li>
+<li><strong>凭据</strong>：<code>secret_id</code> + <code>secret_key</code>；国内站与国际站账号体系独立。</li>
+</ul>
+<h3 id="41-tc3-hmac-sha256">4.1 签名（TC3-HMAC-SHA256）<a class="headerlink" href="#41-tc3-hmac-sha256" title="Permanent link">&para;</a></h3>
+<p>请求头：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Authorization: TC3-HMAC-SHA256 Credential=&lt;SecretId&gt;/&lt;YYYY-MM-DD&gt;/dnspod/tc3_request,
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               SignedHeaders=content-type;host;x-tc-action, Signature=&lt;hex&gt;
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Content-Type: application/json; charset=utf-8
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>X-TC-Action: &lt;Action&gt;
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>X-TC-Timestamp: &lt;Unix 秒&gt;
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>X-TC-Version: 2021-03-23
+</span></code></pre></div>
+<p>规范化请求固定为：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>POST
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>/
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>content-type:application/json; charset=utf-8
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>host:&lt;endpoint host&gt;
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>x-tc-action:&lt;action 小写&gt;
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>content-type;host;x-tc-action
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>SHA256(body)
+</span></code></pre></div>
+<p>派生密钥：<code>HMAC(("TC3" + secret_key), date)</code> → <code>HMAC(..., service)</code> → <code>HMAC(..., "tc3_request")</code>，
+最后对 <code>StringToSign</code> 做 HMAC-SHA256 并转 hex。</p>
+<p>响应体为 <code>{"Response": {...}}</code>；错误位于 <code>Response.Error</code>。</p>
+<h3 id="42">4.2 使用的接口<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>用途</th>
+<th>主要请求参数</th>
+<th>关键响应 / 说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DescribeDomainList</code></td>
+<td>验证、域名列表</td>
+<td><code>Limit</code>（100）、<code>Offset</code></td>
+<td><code>DomainList[]</code>：<code>Name</code>、<code>DomainId</code>、<code>Remark</code>、<code>Status</code>、<code>DNSStatus</code></td>
+</tr>
+<tr>
+<td><code>DescribeRecordList</code></td>
+<td>解析记录列表</td>
+<td><code>Domain</code>、<code>Limit</code>（100）、<code>Offset</code></td>
+<td><code>RecordList[]</code>：<code>RecordId</code>（数字）、<code>Name</code>、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Line</code>、<code>Status</code>、<code>Remark</code></td>
+</tr>
+<tr>
+<td><code>CreateRecord</code></td>
+<td>创建记录</td>
+<td><code>Domain</code>、<code>SubDomain</code>、<code>RecordType</code>、<code>RecordLine</code>、<code>Value</code>、<code>TTL</code>、<code>Remark?</code></td>
+<td>返回 <code>RecordId</code>；国际站忽略 <code>Remark</code></td>
+</tr>
+<tr>
+<td><code>ModifyRecord</code></td>
+<td>修改记录</td>
+<td><code>Domain</code>、<code>RecordId</code>（数字）、<code>SubDomain</code>、<code>RecordType</code>、<code>RecordLine</code>、<code>Value</code>、<code>TTL</code>、<code>Remark?</code></td>
+<td>备注随修改携带；国际站忽略 <code>Remark</code></td>
+</tr>
+<tr>
+<td><code>DeleteRecord</code></td>
+<td>删除记录</td>
+<td><code>Domain</code>、<code>RecordId</code>（数字）</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ModifyRecordStatus</code></td>
+<td>启用 / 停用</td>
+<td><code>Domain</code>、<code>RecordId</code>、<code>Status=ENABLE/DISABLE</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ModifyRecordRemark</code></td>
+<td>写记录备注</td>
+<td><code>Domain</code>、<code>RecordId</code>（数字）、<code>Remark</code></td>
+<td>空串清除；国内站与国际站共用</td>
+</tr>
+<tr>
+<td><code>ModifyDomainRemark</code></td>
+<td>写域名备注</td>
+<td><code>Domain</code>、<code>Remark</code></td>
+<td>空串清除；国内站与国际站共用</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43">4.3 行为说明<a class="headerlink" href="#43" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>DNSStatus=DNSERROR</code> 表示 NS 未按分配指向，解析托管无效，列表同步时过滤掉；
+  空值或其他值视为正常。</li>
+<li>国内站默认线路为 <code>默认</code>，国际站为 <code>Default</code>（大小写敏感）。<code>RecordLine</code> 传线路名称，
+  不接受 <code>LineId</code> <code>"0"</code>。</li>
+<li>记录 ID 必须是数字，适配器在调用前完成转换。</li>
+<li>国内站记录备注随 <code>CreateRecord</code> / <code>ModifyRecord</code> 携带，也可使用 <code>ModifyRecordRemark</code>；
+  修改时空串 <code>Remark</code> 表示清除备注；域名备注使用 <code>ModifyDomainRemark</code>。</li>
+<li>国际站 <code>CreateRecord</code> / <code>ModifyRecord</code> 接受 <code>Remark</code> 字段但不保存，因此创建、修改（含清空）
+  之后适配器会额外调用 <code>ModifyRecordRemark</code> 回写备注（空串即清除）；域名备注使用
+  <code>ModifyDomainRemark</code>。</li>
+</ul>
+<h3 id="44">4.4 错误码归一<a class="headerlink" href="#44" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>平台错误码特征</th>
+<th>归一结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>以 <code>AuthFailure</code> 或 <code>InvalidCredential</code> 开头、<code>UnauthorizedOperation</code></td>
+<td><code>Auth</code></td>
+</tr>
+<tr>
+<td>包含 <code>LimitExceeded</code> 或 <code>RequestLimit</code></td>
+<td><code>RateLimited</code></td>
+</tr>
+<tr>
+<td>以 <code>ResourceNotFound</code> 开头</td>
+<td><code>NotFound</code></td>
+</tr>
+<tr>
+<td>其他</td>
+<td><code>Api { code, message }</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-edgeone">5. 腾讯云 EdgeOne<a class="headerlink" href="#5-edgeone" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>端点</strong>：国内站 <code>https://teo.tencentcloudapi.com</code>，国际站 <code>https://teo.intl.tencentcloudapi.com</code></li>
+<li><strong>版本</strong>：<code>2022-09-01</code></li>
+<li><strong>请求方式</strong>：<code>POST {endpoint}/</code>，JSON 请求体。</li>
+<li><strong>凭据</strong>：<code>secret_id</code> + <code>secret_key</code>；国内站与国际站独立。</li>
+<li><strong>签名</strong>：TC3-HMAC-SHA256，与 DNSPod 共用实现，<code>service=teo</code>，scope 为
+  <code>&lt;date&gt;/teo/tc3_request</code>，请求头同为 <code>content-type</code>、<code>host</code>、<code>x-tc-action</code>。</li>
+<li><strong>节流</strong>：适配器保证相邻两次调用至少间隔 100ms（EdgeOne 有频率配额限制）。</li>
+</ul>
+<h3 id="51">5.1 使用的接口<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>用途</th>
+<th>主要请求参数</th>
+<th>关键响应 / 说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DescribeZones</code></td>
+<td>验证、站点列表</td>
+<td><code>Limit</code>（200）、<code>Offset</code></td>
+<td><code>Zones[]</code>：<code>ZoneName</code>、<code>ZoneId</code>、<code>Status</code>、<code>NSDetail</code>；<code>TotalCount</code></td>
+</tr>
+<tr>
+<td><code>DescribeDnsRecords</code></td>
+<td>解析记录列表</td>
+<td><code>ZoneId</code>、<code>Limit</code>（1000）、<code>Offset</code></td>
+<td><code>DnsRecords[]</code>：<code>RecordId</code>、<code>Name</code>（FQDN）、<code>Type</code>、<code>Content</code>、<code>TTL</code>、<code>Status</code>、<code>Weight</code>、<code>Priority</code>；<code>TotalCount</code></td>
+</tr>
+<tr>
+<td><code>CreateDnsRecord</code></td>
+<td>创建记录</td>
+<td><code>ZoneId</code>、<code>Name</code>（FQDN）、<code>Type</code>、<code>Content</code>、<code>TTL</code>、<code>Weight?</code>、<code>Priority?</code></td>
+<td>返回 <code>RecordId</code></td>
+</tr>
+<tr>
+<td><code>ModifyDnsRecords</code></td>
+<td>修改记录（批量）</td>
+<td><code>ZoneId</code>、<code>DnsRecords[]</code>（单条修改传一条）</td>
+<td>条目含 <code>RecordId</code>、<code>Name</code>、<code>Type</code>、<code>Content</code>、<code>TTL</code>、<code>Weight</code>、<code>Priority</code></td>
+</tr>
+<tr>
+<td><code>DeleteDnsRecords</code></td>
+<td>删除记录（批量）</td>
+<td><code>ZoneId</code>、<code>RecordIds[]</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ModifyDnsRecordsStatus</code></td>
+<td>启用 / 停用（批量）</td>
+<td><code>ZoneId</code> + <code>RecordsToEnable[]</code> 或 <code>RecordsToDisable[]</code></td>
+<td>单条操作传一个元素的数组</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52">5.2 行为说明<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<ul>
+<li>只同步 NS 接入的站点：<code>NSDetail</code> 为空的站点（CNAME 接入、EdgeOne Pages、无域名接入等）
+  不托管 DNS，<code>DescribeDnsRecords</code> 不可用，直接排除。</li>
+<li>系统自动站点 <code>default-pages-zone</code> 排除。</li>
+<li>记录名使用 FQDN，适配器负责 <code>@</code> / 相对名与完整域名互转。</li>
+<li>不下发解析线路 <code>Location</code>，统一使用平台默认线路；<code>line</code> 在统一视图中为空。</li>
+<li>权重 <code>Weight</code> 仅对 <code>A</code> / <code>AAAA</code> / <code>CNAME</code> 下发，取值 -1~100；优先级 <code>Priority</code> 仅对 <code>MX</code>
+  下发，取值 0~50。字段未填写时不携带，由平台默认值（权重 -1、优先级 0）处理；
+  读取时 -1 / 0 归一为「未设置」。</li>
+<li>无记录备注字段，备注仅保存在本地（创建/修改/同步均不丢失）；无 <code>proxied</code> 概念
+  （EdgeOne 代理在站点接入层，不属于 DNS 记录）。</li>
+<li>分页以原始返回条数与 <code>TotalCount</code> 判断结束，避免过滤后死循环。</li>
+</ul>
+<h3 id="53">5.3 错误码归一<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>平台错误码特征</th>
+<th>归一结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>以 <code>AuthFailure</code> 或 <code>InvalidCredential</code> 开头、<code>UnauthorizedOperation</code></td>
+<td><code>Auth</code></td>
+</tr>
+<tr>
+<td>包含 <code>LimitExceeded</code> 或 <code>RequestLimit</code></td>
+<td><code>RateLimited</code></td>
+</tr>
+<tr>
+<td>以 <code>ResourceNotFound</code> 或 <code>ResourceUnavailable</code> 开头</td>
+<td><code>NotFound</code></td>
+</tr>
+<tr>
+<td>其他</td>
+<td><code>Api { code, message }</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-cloudflare">6. CloudFlare<a class="headerlink" href="#6-cloudflare" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Base URL</strong>：<code>https://api.cloudflare.com/client/v4</code></li>
+<li><strong>鉴权</strong>：<code>Authorization: Bearer &lt;api_token&gt;</code>，Token 需具备目标 Zone 的
+  <code>Zone / DNS / Edit</code> 权限。</li>
+<li><strong>响应包裹</strong>：<code>{"success": bool, "errors": [...], "result": ..., "result_info": {...}}</code>。
+  以 <code>success</code> 判断成功；错误取 <code>errors[0]</code> 的 <code>code</code> 与 <code>message</code>。</li>
+<li><strong>分页</strong>：使用 <code>page</code>、<code>per_page</code>，以 <code>result_info.total_pages</code> 判断结束。</li>
+</ul>
+<h3 id="61">6.1 使用的接口<a class="headerlink" href="#61" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方法与路径</th>
+<th>用途</th>
+<th>主要参数</th>
+<th>关键响应</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /zones?per_page=50&amp;page=N</code></td>
+<td>验证、域名列表</td>
+<td><code>page</code>、<code>per_page</code></td>
+<td><code>result[]</code>：<code>id</code>、<code>name</code>、<code>status</code>；仅保留 <code>status=active</code></td>
+</tr>
+<tr>
+<td><code>GET /zones/{zone_id}/dns_records?per_page=100&amp;page=N</code></td>
+<td>解析记录列表</td>
+<td><code>page</code>、<code>per_page</code></td>
+<td><code>result[]</code>：<code>id</code>、<code>name</code>、<code>type</code>、<code>content</code>、<code>ttl</code>、<code>proxied</code>、<code>comment</code></td>
+</tr>
+<tr>
+<td><code>POST /zones/{zone_id}/dns_records</code></td>
+<td>创建记录</td>
+<td><code>type</code>、<code>name</code>（FQDN）、<code>content</code>、<code>ttl</code>、<code>proxied</code>、<code>comment?</code></td>
+<td>返回创建后的记录</td>
+</tr>
+<tr>
+<td><code>PUT /zones/{zone_id}/dns_records/{record_id}</code></td>
+<td>修改记录</td>
+<td>同创建；<code>comment</code> 传空串清除</td>
+<td>更新成功即采用本地视图</td>
+</tr>
+<tr>
+<td><code>DELETE /zones/{zone_id}/dns_records/{record_id}</code></td>
+<td>删除记录</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62">6.2 行为说明<a class="headerlink" href="#62" title="Permanent link">&para;</a></h3>
+<ul>
+<li>仅同步 <code>status=active</code> 的 Zone；<code>pending</code> 表示 NS 未切换，<code>moved</code> / <code>deleted</code> 同样排除。</li>
+<li>记录名使用 FQDN，适配器负责与相对 <code>host</code> 互转；根记录为 <code>@</code>。</li>
+<li>创建时 <code>proxied</code> 默认 <code>false</code>；修改使用 <code>PUT</code> 全量字段。</li>
+<li>记录备注使用 <code>comment</code> 字段，随创建/修改携带；没有单独的上游备注接口。</li>
+<li>平台不提供 DNS 记录级启停，调用启停返回 <code>Unsupported</code>。</li>
+<li>域名无备注概念，平台回写返回 <code>Unsupported</code>，域名备注仅保存在本地。</li>
+<li>读取记录时 <code>enabled</code> 恒为 <code>true</code>；<code>ttl</code> 缺省为 1。</li>
+</ul>
+<h3 id="63">6.3 错误码归一<a class="headerlink" href="#63" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>HTTP 状态</th>
+<th>归一结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>401、403</td>
+<td><code>Auth</code></td>
+</tr>
+<tr>
+<td>429</td>
+<td><code>RateLimited</code>（解析 <code>Retry-After</code>）</td>
+</tr>
+<tr>
+<td>404</td>
+<td><code>NotFound</code></td>
+</tr>
+<tr>
+<td>其他</td>
+<td><code>Api { code, message }</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="7-dns">7. 火山引擎云解析 DNS<a class="headerlink" href="#7-dns" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>端点</strong>：<code>https://dns.volcengineapi.com</code></li>
+<li><strong>版本</strong>：<code>2018-08-01</code></li>
+<li><strong>服务 / Region</strong>：<code>service=dns</code>，<code>region=Global</code>（云解析 DNS 为 Global 服务）。</li>
+<li><strong>凭据</strong>：<code>access_key_id</code> + <code>access_key_secret</code>（IAM 访问密钥，需云解析 DNS 权限）。</li>
+<li><strong>官方文档</strong>：<ul>
+<li><a href="https://api.volcengine.com/api-docs/view?serviceCode=dns&amp;version=2018-08-01&amp;action=ListZones">域名管理（ListZones）</a></li>
+<li><a href="https://api.volcengine.com/api-docs/view?serviceCode=dns&amp;version=2018-08-01&amp;action=ListRecords">域名解析管理（ListRecords）</a></li>
+</ul>
+</li>
+<li><strong>请求方式</strong>：RPC 风格。读接口用 <code>GET</code>，<code>Action</code>、<code>Version</code> 与业务参数全在 query；
+  写接口用 <code>POST</code>，query 仅含 <code>Action</code>、<code>Version</code>，业务参数放 JSON body。</li>
+</ul>
+<h3 id="71-v4hmac-sha256">7.1 签名（V4，HMAC-SHA256）<a class="headerlink" href="#71-v4hmac-sha256" title="Permanent link">&para;</a></h3>
+<p>请求头：<code>X-Date</code>（UTC <code>YYYYMMDDTHHMMSSZ</code>）、<code>Authorization</code>；POST 另带
+<code>X-Content-Sha256</code>（body 的 SHA256 hex）与 <code>Content-Type: application/json</code>。</p>
+<ol>
+<li>规范化 query：参数按 key 升序，键值做 RFC3986 编码后以 <code>&amp;</code> 连接；</li>
+<li>规范化请求：</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>GET  →  METHOD\n/\n&lt;query&gt;\nhost:&lt;host&gt;\nx-date:&lt;x-date&gt;\n\nhost;x-date\n&lt;payload hash&gt;
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>POST →  METHOD\n/\n&lt;query&gt;\nhost:&lt;host&gt;\nx-content-sha256:&lt;hash&gt;\nx-date:&lt;x-date&gt;\n\n
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        host;x-content-sha256;x-date\n&lt;payload hash&gt;
+</span></code></pre></div>
+<ol>
+<li><code>StringToSign = "HMAC-SHA256\n" + X-Date + "\n" + scope + "\n" + SHA256(CanonicalRequest)</code>；</li>
+<li>scope 为 <code>&lt;YYYYMMDD&gt;/Global/dns/request</code>；</li>
+<li>派生密钥：<code>kDate = HMAC(SK, date)</code> → <code>kRegion = HMAC(kDate, "Global")</code> →
+   <code>kService = HMAC(kRegion, "dns")</code> → <code>kSigning = HMAC(kService, "request")</code>，
+   每步以上一步的原始字节作为密钥；</li>
+<li><code>Authorization: HMAC-SHA256 Credential=&lt;AK&gt;/&lt;scope&gt;, SignedHeaders=&lt;...&gt;, Signature=&lt;hex&gt;</code>。</li>
+</ol>
+<p>响应为 <code>{"ResponseMetadata": {...}, "Result": {...}}</code>；错误位于
+<code>ResponseMetadata.Error</code>。</p>
+<h3 id="72">7.2 使用的接口<a class="headerlink" href="#72" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>方法</th>
+<th>用途</th>
+<th>主要请求参数</th>
+<th>关键响应 / 说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ListZones</code></td>
+<td>GET</td>
+<td>验证、域名列表、按域名定位</td>
+<td><code>PageNumber</code>、<code>PageSize</code>（≤500）；可选 <code>Key</code>、<code>SearchMode=exact</code></td>
+<td><code>Result.Zones[]</code>：<code>ZID</code>、<code>ZoneName</code>、<code>Remark</code>；<code>Result.Total</code>。响应中的 <code>CacheStage</code> 不反映当前接入状态，不用于状态判定</td>
+</tr>
+<tr>
+<td><code>QueryZone</code></td>
+<td>GET</td>
+<td>查询域名权威状态</td>
+<td><code>ZID</code></td>
+<td><code>Result.Stage</code>（0 正常；1 待找回；2 未使用 TrafficRoute 解析；3 异常；5 请变更 DNS 服务器）、<code>Result.IsNSCorrect</code></td>
+</tr>
+<tr>
+<td><code>ListRecords</code></td>
+<td>GET</td>
+<td>解析记录列表</td>
+<td><code>ZID</code>、<code>PageNumber</code>、<code>PageSize</code>（500）</td>
+<td><code>Result.Records[]</code>：<code>RecordID</code>、<code>Host</code>、<code>Type</code>、<code>TTL</code>、<code>Line</code>、<code>Value</code>、<code>Weight</code>、<code>Enable</code>、<code>Remark</code>、<code>Tags</code></td>
+</tr>
+<tr>
+<td><code>CreateRecord</code></td>
+<td>POST</td>
+<td>创建记录</td>
+<td><code>ZID</code>、<code>Host</code>、<code>Type</code>、<code>Value</code>、<code>Line</code>（默认 <code>default</code>）、<code>TTL</code>、<code>Remark?</code></td>
+<td>返回 <code>Result</code>（含 <code>RecordID</code> 等）</td>
+</tr>
+<tr>
+<td><code>UpdateRecord</code></td>
+<td>POST</td>
+<td>修改记录</td>
+<td><code>RecordID</code>、<code>Host</code>、<code>Line</code>（两者必填）、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Remark?</code></td>
+<td>修改时必须回填当前主机记录与线路</td>
+</tr>
+<tr>
+<td><code>UpdateRecordStatus</code></td>
+<td>POST</td>
+<td>启用 / 停用</td>
+<td><code>RecordID</code>、<code>Enable</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>DeleteRecord</code></td>
+<td>POST</td>
+<td>删除记录</td>
+<td><code>RecordID</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>QueryRecord</code></td>
+<td>GET</td>
+<td>查询单条记录</td>
+<td><code>RecordID</code></td>
+<td><code>Result</code> 中含当前 <code>Host</code>、<code>Line</code>、<code>Type</code>、<code>Value</code>、<code>TTL</code>、<code>Remark</code></td>
+</tr>
+<tr>
+<td><code>UpdateZone</code></td>
+<td>POST</td>
+<td>写域名备注</td>
+<td><code>ZID</code>、<code>Remark</code></td>
+<td>空串清除</td>
+</tr>
+</tbody>
+</table>
+<h3 id="73">7.3 行为说明<a class="headerlink" href="#73" title="Permanent link">&para;</a></h3>
+<ul>
+<li>域名状态以 <code>QueryZone</code> 的 <code>Stage</code> 与 <code>IsNSCorrect</code> 判定：<code>Stage=0</code> 且 NS
+  正确 → <code>enable</code>；<code>Stage</code> 非 0、<code>IsNSCorrect=false</code>、<code>Stage</code> 缺失或查询失败
+  → <code>error</code>。<code>ListZones</code> 的 <code>CacheStage</code> 不参与判定（实测未设置 NS 时仍为 0），
+  也不再将缺失状态兜底为正常。单个域名查询失败不影响其他域名同步。</li>
+<li>记录启用状态由 <code>Enable</code> 布尔值映射。</li>
+<li><code>UpdateRecord</code> 要求 <code>Host</code>、<code>Line</code> 必填，修改与单独更新备注时均需回填；
+  只改备注时先 <code>QueryRecord</code> 取当前 <code>Host</code>/<code>Line</code>，再 <code>UpdateRecord</code>。
+  备注为空串时同样下发 <code>Remark: ""</code>，用于清除平台侧备注。</li>
+<li>更新域名备注时，域名无法直接得到 <code>ZID</code>：先调用
+  <code>ListZones(Key=&lt;域名&gt;, SearchMode=exact)</code> 精确定位，再 <code>UpdateZone</code>。</li>
+<li>记录备注按官方中文文档保守限制为 16 个字符，超长在本地拒绝，不调用平台。</li>
+<li>权重与优先级不参与统一模型，<code>weight</code>、<code>priority</code>、<code>proxied</code> 均为空。</li>
+<li>分页以单页返回条数是否小于 500 判断结束。</li>
+</ul>
+<h3 id="74">7.4 错误码归一<a class="headerlink" href="#74" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>平台错误码</th>
+<th>归一结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InvalidAccessKey</code>、<code>SignatureDoesNotMatch</code>、<code>MissingAuthenticationToken</code>、<code>InvalidCredentials</code>、<code>ServiceNotAuthorized</code>、<code>Unauthorized</code></td>
+<td><code>Auth</code></td>
+</tr>
+<tr>
+<td><code>RequestLimitExceeded</code>、<code>Throttling</code>、<code>FlowLimitExceeded</code></td>
+<td><code>RateLimited</code></td>
+</tr>
+<tr>
+<td><code>ErrZoneNotFound</code>、<code>ErrRecordNotFound</code></td>
+<td><code>NotFound</code></td>
+</tr>
+<tr>
+<td>其他</td>
+<td><code>Api { code, message }</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="8">8. 跨平台能力矩阵<a class="headerlink" href="#8" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>阿里云</th>
+<th>DNSPod</th>
+<th>EdgeOne</th>
+<th>CloudFlare</th>
+<th>火山引擎</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>凭据验证</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>域名列表</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅（仅 NS 接入站点）</td>
+<td>✅（仅 active）</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>记录列表</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>创建 / 修改 / 删除</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>记录启停</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>❌ 返回 <code>Unsupported</code></td>
+<td>✅</td>
+</tr>
+<tr>
+<td>记录备注（随创建/修改）</td>
+<td>✅（创建后单独写）</td>
+<td>✅ 国内站随接口，国际站随后调用 <code>ModifyRecordRemark</code></td>
+<td>❌ 上游无，仅本地</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>记录备注（单独更新接口）</td>
+<td>✅ <code>UpdateDomainRecordRemark</code></td>
+<td>✅ <code>ModifyRecordRemark</code>（国内/国际站）</td>
+<td>❌ 上游无</td>
+<td>❌ 无单独接口</td>
+<td>✅ <code>QueryRecord</code> + <code>UpdateRecord</code></td>
+</tr>
+<tr>
+<td>域名备注</td>
+<td>✅</td>
+<td>✅</td>
+<td>❌ 仅本地</td>
+<td>❌ 仅本地</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>解析线路</td>
+<td>✅</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>权重 / 优先级</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>代理状态 <code>proxied</code></td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+</tbody>
+</table>
+<p>说明：</p>
+<ul>
+<li>「❌ 仅本地」表示平台无该字段，<code>set_domain_remark</code> 返回 <code>Unsupported</code>，Web 层忽略该错误
+  并只保存本地备注。</li>
+<li>所有平台的记录表单均可填写备注。上游有记录备注字段的平台（阿里云、DNSPod 国内站、
+  DNSPod 国际站、CloudFlare、火山引擎）在创建、修改、清空时回写上游，同步时以上游返回值为准
+  （含平台侧清空）；EdgeOne 无有效记录备注字段，备注仅保存在本地，
+  <code>DnsProvider::supports_record_remark</code> 返回 <code>false</code>，创建/修改/同步均保留本地备注。</li>
+<li>DNSPod 国内站与 CloudFlare 的记录备注随创建/修改接口携带，修改时空串表示清除。</li>
+<li>DNSPod 国际站创建、修改（含清空）后额外调用 <code>ModifyRecordRemark</code> 回写备注。</li>
+<li>阿里云创建接口不带备注，创建成功后补一次 <code>UpdateDomainRecordRemark</code>。</li>
+<li>火山引擎 <code>UpdateRecord</code> 修改时下发当前备注（含空串清除）；单独更新备注时先
+  <code>QueryRecord</code> 回填必填字段。</li>
+</ul>
+<h2 id="9">9. 代码索引<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>内容</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>平台类型、凭据字段、统一记录模型、<code>DnsProvider</code> 抽象</td>
+<td><code>src/providers/mod.rs</code></td>
+</tr>
+<tr>
+<td>阿里云 RPC 签名与接口调用</td>
+<td><code>src/providers/aliyun.rs</code></td>
+</tr>
+<tr>
+<td>腾讯云 TC3 签名（DNSPod / EdgeOne 共用）</td>
+<td><code>src/providers/dnspod.rs</code></td>
+</tr>
+<tr>
+<td>EdgeOne 接口与权重/优先级规则</td>
+<td><code>src/providers/edgeone.rs</code></td>
+</tr>
+<tr>
+<td>CloudFlare v4 调用与响应解析</td>
+<td><code>src/providers/cloudflare.rs</code></td>
+</tr>
+<tr>
+<td>火山引擎 V4 签名与接口调用</td>
+<td><code>src/providers/volcengine.rs</code></td>
+</tr>
+<tr>
+<td>记录入参校验与回写流程</td>
+<td><code>src/web/records.rs</code></td>
+</tr>
+<tr>
+<td>同步流程（只读接口、限流重试）</td>
+<td><code>src/sync.rs</code></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="页脚" >
+        
+          
+          <a href="../04-providers/" class="md-footer__link md-footer__link--prev" aria-label="上一页: DNS 提供商">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一页
+              </span>
+              <div class="md-ellipsis">
+                DNS 提供商
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../05-api/" class="md-footer__link md-footer__link--next" aria-label="下一页: REST API">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一页
+              </span>
+              <div class="md-ellipsis">
+                REST API
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy;  Jetsung Chan
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"已复制","clipboard.copy":"复制","clipboard.error":"Could not copy to clipboard","search.result.more.one":"在该页上还有 1 个符合条件的结果","search.result.more.other":"在该页上还有 # 个符合条件的结果","search.result.none":"没有找到符合条件的结果","search.result.one":"找到 1 个符合条件的结果","search.result.other":"# 个符合条件的结果","search.result.placeholder":"键入以开始搜索","search.result.term.missing":"缺少","select.version":"选择当前版本"},"version":null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.77dd0ce9.min.js"></script>
+      
+    
+  </body>
+</html>
