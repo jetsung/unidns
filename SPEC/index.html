@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="多平台 DNS 记录统一管理：聚合阿里云/DNSPod/EdgeOne/CloudFlare，一次查看与编辑全部域名记录">
+        <meta name="description" content="多平台 DNS 记录统一管理：聚合阿里云&#x2f;DNSPod&#x2f;EdgeOne&#x2f;CloudFlare，一次查看与编辑全部域名记录">
       
       
       
@@ -18,7 +18,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.73">
+      <meta name="generator" content="zensical-0.0.74">
     
     
       
@@ -1730,6 +1730,10 @@
 <li>记录备注随同步按平台能力处理：上游支持记录备注的平台（阿里云、DNSPod 国内站、
   DNSPod 国际站、CloudFlare、火山引擎）本地备注以上游返回值为准（含平台侧清空）；
   EdgeOne 无有效上游备注字段，同步保留本地备注，不因上游空值清空。</li>
+<li>域名备注随同步维护：上游提供域名备注的平台（阿里云、DNSPod 国内站、DNSPod
+  国际站、火山引擎）本地备注为空时以上游返回值填充到本地、本地非空时保留本地值
+  不被覆盖；上游无域名备注概念的平台（CloudFlare、EdgeOne）同步不改变本地备注；
+  新域名首次同步携带上游备注入库。</li>
 <li>支持全量同步：一次触发对所有已启用账户执行；单个账户失败不中断其他账户，
   失败账户在结果中标记。</li>
 </ul>
@@ -2269,10 +2273,10 @@ HTTPS——Service Worker 仅在 HTTPS 或 localhost 下可用，HTTP 访问时�
       
         
         
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"已复制","clipboard.copy":"复制","clipboard.error":"Could not copy to clipboard","search.result.more.one":"在该页上还有 1 个符合条件的结果","search.result.more.other":"在该页上还有 # 个符合条件的结果","search.result.none":"没有找到符合条件的结果","search.result.one":"找到 1 个符合条件的结果","search.result.other":"# 个符合条件的结果","search.result.placeholder":"键入以开始搜索","search.result.term.missing":"缺少","select.version":"选择当前版本"},"version":null}</script>
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"redirect":null,"search":"../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"已复制","clipboard.copy":"复制","clipboard.error":"Could not copy to clipboard","search.result.more.one":"在该页上还有 1 个符合条件的结果","search.result.more.other":"在该页上还有 # 个符合条件的结果","search.result.none":"没有找到符合条件的结果","search.result.one":"找到 1 个符合条件的结果","search.result.other":"# 个符合条件的结果","search.result.placeholder":"键入以开始搜索","search.result.term.missing":"缺少","select.version":"选择当前版本"},"version":null}</script>
     
     
-      <script src="../assets/javascripts/bundle.77dd0ce9.min.js"></script>
+      <script src="../assets/javascripts/bundle.d31f0ffa.min.js"></script>
       
     
   </body>
