@@ -2314,9 +2314,10 @@ HTTP 状态与错误码：</p>
 <li>「❌ 仅本地」表示平台无该字段，<code>set_domain_remark</code> 返回 <code>Unsupported</code>，Web 层忽略该错误
   并只保存本地备注。</li>
 <li>所有平台的记录表单均可填写备注。上游有记录备注字段的平台（阿里云、DNSPod 国内站、
-  DNSPod 国际站、CloudFlare、火山引擎）在创建、修改、清空时回写上游，同步时以上游返回值为准
-  （含平台侧清空）；EdgeOne 无有效记录备注字段，备注仅保存在本地，
-  <code>DnsProvider::supports_record_remark</code> 返回 <code>false</code>，创建/修改/同步均保留本地备注。</li>
+  DNSPod 国际站、CloudFlare、火山引擎）在创建、修改、清空时回写上游；同步时本地备注
+  非空则保留本地值，本地为空时以上游返回值为准填充；EdgeOne 无有效记录备注字段，
+  备注仅保存在本地，<code>DnsProvider::supports_record_remark</code> 返回 <code>false</code>，
+  创建/修改/同步均保留本地备注。</li>
 <li>DNSPod 国内站与 CloudFlare 的记录备注随创建/修改接口携带，修改时空串表示清除。</li>
 <li>DNSPod 国际站创建、修改（含清空）后额外调用 <code>ModifyRecordRemark</code> 回写备注。</li>
 <li>阿里云创建接口不带备注，创建成功后补一次 <code>UpdateDomainRecordRemark</code>。</li>
