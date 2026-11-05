@@ -223,8 +223,11 @@ export function zoneStatusBadge(status) {
   if (["pause", "paused", "disable", "disabled"].includes(s)) {
     return '<span class="badge warn"><span class="dot"></span>已暂停</span>';
   }
-  // 未知状态：原样小写展示，避免误导
-  return `<span class="badge outline">${esc(s)}</span>`;
+  if (["error", "abnormal", "2", "3", "5"].includes(s)) {
+    return '<span class="badge err"><span class="dot"></span>异常</span>';
+  }
+  // 未知状态：展示「未知」徽章，原始值放入 title 便于排查
+  return `<span class="badge outline" title="${esc(s)}">未知</span>`;
 }
 
 /**

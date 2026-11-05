@@ -76,16 +76,30 @@ impl MockState {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MockProvider {
     pub state: Arc<Mutex<MockState>>,
+    record_remark_supported: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Default for MockProvider {
+    fn default() -> Self {
+        Self::new(MockState::default())
+    }
 }
 
 impl MockProvider {
     pub fn new(state: MockState) -> Self {
         Self {
             state: Arc::new(Mutex::new(state)),
+            record_remark_supported: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         }
+    }
+
+    /// 模拟上游无记录备注字段的平台（备注仅本地保存）。
+    pub fn disable_record_remark(&self) {
+        self.record_remark_supported
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     async fn track(&self, call: &str) {
@@ -100,6 +114,11 @@ impl MockProvider {
 
 #[async_trait]
 impl DnsProvider for MockProvider {
+    fn supports_record_remark(&self) -> bool {
+        self.record_remark_supported
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     async fn verify(&self) -> Result<(), ProviderError> {
         self.track("verify").await;
         match self.state.lock().await.fail_verify.take() {
@@ -153,7 +172,12 @@ impl DnsProvider for MockProvider {
             line: input.line.clone(),
             proxied: input.proxied,
             enabled: true,
-            remark: input.remark.clone(),
+            // 上游无备注字段时平台记录不携带备注
+            remark: if self.supports_record_remark() {
+                input.remark.clone()
+            } else {
+                None
+            },
             weight: input.weight,
             priority: input.priority,
         };
@@ -171,6 +195,7 @@ impl DnsProvider for MockProvider {
         record: &ProviderRecord,
     ) -> Result<ProviderRecord, ProviderError> {
         self.track("update_record").await;
+        let supports_remark = self.supports_record_remark();
         let mut guard = self.state.lock().await;
         if let Some(e) = guard.fail_update.take() {
             return Err(e);
@@ -184,8 +209,13 @@ impl DnsProvider for MockProvider {
             .find(|r| r.provider_record_id == record.provider_record_id);
         match existing {
             Some(r) => {
-                *r = record.clone();
-                Ok(record.clone())
+                let mut stored = record.clone();
+                if !supports_remark {
+                    // 上游无备注字段：平台侧记录不保留备注
+                    stored.remark = None;
+                }
+                *r = stored.clone();
+                Ok(stored)
             }
             None => Err(ProviderError::NotFound("记录不存在".into())),
         }

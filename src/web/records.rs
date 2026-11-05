@@ -408,7 +408,11 @@ pub async fn create_record(
     }
     check_volcengine_remark(account.provider_type(), input.remark.as_deref())?;
     let provider = build_provider_for_account(&state, &account)?;
-    let created = provider.create_record(&zone_of(&domain), &input).await?;
+    let mut created = provider.create_record(&zone_of(&domain), &input).await?;
+    if !provider.supports_record_remark() {
+        // 上游无记录备注字段：备注仅本地保存，以提交值为准
+        created.remark = input.remark.clone();
+    }
     let record_id = insert_local_record(&state, &domain, &created).await?;
     tracing::info!(record_id, domain = %domain.name, account_id = account.id, "创建解析记录并回写平台");
     Ok((
@@ -468,9 +472,16 @@ pub async fn update_record(
     })?;
     check_volcengine_remark(account.provider_type(), merged.remark.as_deref())?;
     let provider = build_provider_for_account(&state, &account)?;
+    let supports_remark = provider.supports_record_remark();
     match provider.update_record(&zone_of(&domain), &merged).await {
         // 以适配器返回值写库，确保 EdgeOne 的归一结果（line 为空等）落盘
         Ok(updated) => {
+            let local_remark = if supports_remark {
+                updated.remark.clone()
+            } else {
+                // 上游无记录备注字段：保留提交的备注，避免适配器返回空值覆盖本地
+                merged.remark.clone()
+            };
             sqlx::query(
                 "UPDATE records SET host = ?, rtype = ?, value = ?, ttl = ?, line = ?, proxied = ?, remark = ?, weight = ?, priority = ?, pending_sync = 0, synced_at = ? WHERE id = ?",
             )
@@ -480,7 +491,7 @@ pub async fn update_record(
             .bind(updated.ttl as i64)
             .bind(updated.line.clone().unwrap_or_default())
             .bind(updated.proxied.map(|p| p as i64))
-            .bind(updated.remark.clone().unwrap_or_default())
+            .bind(local_remark.unwrap_or_default())
             .bind(updated.weight)
             .bind(updated.priority)
             .bind(now_utc())
@@ -1294,5 +1305,115 @@ mod tests {
         )
         .await;
         assert_eq!(body_json(res).await["name"], "example.com");
+    }
+
+    /// 上游无记录备注字段的平台：创建/修改后本地备注保留，不被适配器返回值清空。
+    #[tokio::test]
+    async fn record_remark_kept_locally_when_provider_unsupported() {
+        let (state, mocks) = test_app_with_multi_mock().await;
+        let mock = mocks.get("a").unwrap().clone();
+        mock.disable_record_remark();
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+        let res = req(&app, "POST", "/api/v1/accounts",
+            Some(r#"{"name":"EdgeOne 测试","provider_type":"edgeone_intl","credentials":{"secret_id":"id-aaaa-1111","secret_key":"key-aaaa-2222","mock_id":"a"}}"#),
+            Some(&cookie)).await;
+        assert_eq!(res.status(), 201);
+        let account_id = body_json(res).await["id"].as_i64().unwrap();
+        req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{account_id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        wait_sync_done(&state.pool, account_id).await;
+        let domain_id: i64 = sqlx::query_scalar("SELECT id FROM domains LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+
+        // 创建带备注：平台侧无备注字段，本地保留提交值
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/domains/{domain_id}/records"),
+            Some(r#"{"host":"api","rtype":"A","value":"1.2.3.4","ttl":600,"remark":"仅本地备注"}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 201);
+        let record_id = body_json(res).await["id"].as_i64().unwrap();
+        let row = sqlx::query_as::<_, RecordRow>("SELECT * FROM records WHERE id = ?")
+            .bind(record_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.remark, "仅本地备注");
+        {
+            let guard = mock.state.lock().await;
+            let platform = guard.records["example.com"]
+                .iter()
+                .find(|r| r.provider_record_id == row.provider_record_id)
+                .unwrap();
+            assert_eq!(platform.remark, None, "上游无备注字段");
+        }
+
+        // 修改其他字段：本地备注不被适配器返回的空值覆盖
+        let res = req(
+            &app,
+            "PATCH",
+            &format!("/api/v1/records/{record_id}"),
+            Some(r#"{"value":"5.6.7.8"}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 204);
+        let row = sqlx::query_as::<_, RecordRow>("SELECT * FROM records WHERE id = ?")
+            .bind(record_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.value, "5.6.7.8");
+        assert_eq!(row.remark, "仅本地备注");
+
+        // 修改备注：仅本地更新
+        let res = req(
+            &app,
+            "PATCH",
+            &format!("/api/v1/records/{record_id}"),
+            Some(r#"{"remark":"新备注"}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 204);
+        let row = sqlx::query_as::<_, RecordRow>("SELECT * FROM records WHERE id = ?")
+            .bind(record_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.remark, "新备注");
+
+        // 清空备注：本地置空
+        let res = req(
+            &app,
+            "PATCH",
+            &format!("/api/v1/records/{record_id}"),
+            Some(r#"{"remark":""}"#),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 204);
+        let remark: String = sqlx::query_scalar("SELECT remark FROM records WHERE id = ?")
+            .bind(record_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert!(remark.is_empty());
     }
 }

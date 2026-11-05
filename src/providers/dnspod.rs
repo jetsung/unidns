@@ -287,6 +287,10 @@ fn parse_record(v: &Value) -> Option<ProviderRecord> {
 
 #[async_trait]
 impl DnsProvider for DnspodProvider {
+    fn supports_record_remark(&self) -> bool {
+        true
+    }
+
     async fn verify(&self) -> Result<(), ProviderError> {
         let payload = serde_json::json!({"Limit": 1, "Offset": 0});
         self.call("DescribeDomainList", payload).await?;
@@ -374,7 +378,7 @@ impl DnsProvider for DnspodProvider {
                 });
             }
         };
-        Ok(ProviderRecord {
+        let record = ProviderRecord {
             provider_record_id: record_id,
             host: input.host.clone(),
             rtype: input.rtype.clone(),
@@ -386,7 +390,15 @@ impl DnsProvider for DnspodProvider {
             remark: input.remark.clone(),
             weight: None,
             priority: None,
-        })
+        };
+        // 国际站创建接口不保存 Remark，创建后调用独立备注接口回写
+        if self.site == DnspodSite::International
+            && let Some(r) = input.remark.as_deref().filter(|r| !r.is_empty())
+        {
+            self.set_record_remark(zone, &record.provider_record_id, r)
+                .await?;
+        }
+        Ok(record)
     }
 
     async fn update_record(
@@ -410,7 +422,32 @@ impl DnsProvider for DnspodProvider {
             payload["Remark"] = serde_json::Value::String(r.to_string());
         }
         self.call("ModifyRecord", payload).await?;
+        // 国际站修改接口不保存 Remark，修改后调用独立备注接口回写（空串清除）
+        if self.site == DnspodSite::International
+            && let Some(r) = record.remark.as_deref()
+        {
+            self.set_record_remark(zone, &record.provider_record_id, r)
+                .await?;
+        }
         Ok(record.clone())
+    }
+
+    async fn set_record_remark(
+        &self,
+        zone: &ProviderZone,
+        provider_record_id: &str,
+        remark: &str,
+    ) -> Result<(), ProviderError> {
+        let payload = serde_json::json!({
+            "Domain": zone.name,
+            "RecordId": provider_record_id.parse::<i64>().map_err(|_| ProviderError::Api {
+                code: "BadRecordId".into(),
+                message: format!("腾讯云记录 ID 必须是数字: {provider_record_id}"),
+            })?,
+            "Remark": remark,
+        });
+        self.call("ModifyRecordRemark", payload).await?;
+        Ok(())
     }
 
     async fn delete_record(
@@ -561,5 +598,147 @@ mod tests {
         let other =
             serde_json::json!({"Code": "FailedOperation.DomainNotVerified", "Message": "x"});
         assert!(matches!(map_error(&other), ProviderError::Api { .. }));
+    }
+
+    type Captured = std::sync::Arc<tokio::sync::Mutex<Vec<(String, Value)>>>;
+
+    async fn capture_handler(
+        axum::extract::State(captured): axum::extract::State<Captured>,
+        headers: axum::http::HeaderMap,
+        body: axum::body::Bytes,
+    ) -> axum::Json<Value> {
+        let action = headers
+            .get("x-tc-action")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        captured.lock().await.push((action, payload));
+        axum::Json(serde_json::json!({"Response": {"RequestId": "r", "RecordId": 123}}))
+    }
+
+    async fn spawn_capture() -> (String, Captured) {
+        use axum::{Router, routing::any};
+        let captured: Captured = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/", any(capture_handler))
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), captured)
+    }
+
+    fn test_record(remark: Option<String>) -> ProviderRecord {
+        ProviderRecord {
+            provider_record_id: "123".into(),
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: Some("默认".into()),
+            proxied: None,
+            enabled: true,
+            remark,
+            weight: None,
+            priority: None,
+        }
+    }
+
+    /// 创建/修改携带 Remark；修改时空串同样下发以清除备注。
+    #[tokio::test]
+    async fn create_and_update_carry_remark_including_empty() {
+        let (base, captured) = spawn_capture().await;
+        let p = DnspodProvider::new(
+            DnspodCredentials {
+                secret_id: "id".into(),
+                secret_key: "key".into(),
+            },
+            DnspodSite::China,
+        )
+        .with_endpoint(&base);
+        let zone = ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: String::new(),
+        };
+        let input = RecordInput {
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: None,
+            proxied: None,
+            remark: Some("生产".into()),
+            weight: None,
+            priority: None,
+        };
+        p.create_record(&zone, &input).await.unwrap();
+        p.update_record(&zone, &test_record(Some("更新".into())))
+            .await
+            .unwrap();
+        p.update_record(&zone, &test_record(Some(String::new())))
+            .await
+            .unwrap();
+
+        let reqs = captured.lock().await;
+        assert_eq!(reqs[0].0, "CreateRecord");
+        assert_eq!(reqs[0].1["Remark"], "生产");
+        assert_eq!(reqs[1].0, "ModifyRecord");
+        assert_eq!(reqs[1].1["Remark"], "更新");
+        assert_eq!(reqs[2].0, "ModifyRecord");
+        assert_eq!(reqs[2].1["Remark"], "", "清空备注需下发空串");
+    }
+
+    /// 国际站创建/修改接口不保存 Remark，需在写记录后调用 ModifyRecordRemark。
+    #[tokio::test]
+    async fn international_writes_remark_via_modify_record_remark() {
+        let (base, captured) = spawn_capture().await;
+        let p = DnspodProvider::new(
+            DnspodCredentials {
+                secret_id: "id".into(),
+                secret_key: "key".into(),
+            },
+            DnspodSite::International,
+        )
+        .with_endpoint(&base);
+        let zone = ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: String::new(),
+        };
+        let input = RecordInput {
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: None,
+            proxied: None,
+            remark: Some("生产".into()),
+            weight: None,
+            priority: None,
+        };
+        p.create_record(&zone, &input).await.unwrap();
+        p.update_record(&zone, &test_record(Some("更新".into())))
+            .await
+            .unwrap();
+        p.update_record(&zone, &test_record(Some(String::new())))
+            .await
+            .unwrap();
+
+        let reqs = captured.lock().await;
+        let actions: Vec<&str> = reqs.iter().map(|(a, _)| a.as_str()).collect();
+        assert_eq!(
+            actions,
+            [
+                "CreateRecord",
+                "ModifyRecordRemark",
+                "ModifyRecord",
+                "ModifyRecordRemark",
+                "ModifyRecord",
+                "ModifyRecordRemark"
+            ]
+        );
+        assert_eq!(reqs[1].1["Remark"], "生产");
+        assert_eq!(reqs[3].1["Remark"], "更新");
+        assert_eq!(reqs[5].1["Remark"], "", "清空备注需下发空串");
     }
 }

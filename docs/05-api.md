@@ -64,7 +64,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:18686/api/v1/accounts \
 |---|---|---|
 | GET | `/domains?page=&page_size=&search=&account_id=` | 分页域名列表（含账户名与平台名） |
 | GET | `/domains/{id}` | 域名详情 |
-| PATCH | `/domains/{id}` | 更新本地备注（`remark`，不回写平台） |
+| PATCH | `/domains/{id}` | 更新域名备注（`remark`；阿里云、DNSPod、火山引擎回写平台，其余平台仅本地保存） |
 | GET | `/domains/{id}/records?...` | 记录列表（支持搜索/筛选，分页同上） |
 | POST | `/domains/{id}/records` | 新建记录（回写上游平台，TTL/线路受平台约束） |
 | PATCH | `/records/{id}` | 更新记录（host/rtype/value/ttl/line/remark/proxied/weight/priority） |

@@ -216,6 +216,10 @@ fn parse_record(v: &Value) -> Option<ProviderRecord> {
 
 #[async_trait]
 impl DnsProvider for AliyunProvider {
+    fn supports_record_remark(&self) -> bool {
+        true
+    }
+
     async fn verify(&self) -> Result<(), ProviderError> {
         let mut params = BTreeMap::new();
         params.insert("PageSize".into(), "1".into());
@@ -538,5 +542,94 @@ mod tests {
         assert!(matches!(map_error(&notfound), ProviderError::NotFound(_)));
         let other = serde_json::json!({"Code": "SomeError", "Message": "boom"});
         assert!(matches!(map_error(&other), ProviderError::Api { .. }));
+    }
+
+    type Captured =
+        std::sync::Arc<tokio::sync::Mutex<Vec<std::collections::HashMap<String, String>>>>;
+
+    async fn capture_handler(
+        axum::extract::State(captured): axum::extract::State<Captured>,
+        uri: axum::http::Uri,
+    ) -> axum::Json<Value> {
+        let params = uri
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .filter_map(|kv| kv.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        captured.lock().await.push(params);
+        axum::Json(serde_json::json!({"RecordId": "1"}))
+    }
+
+    async fn spawn_capture() -> (String, Captured) {
+        use axum::{Router, routing::any};
+        let captured: Captured = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/", any(capture_handler))
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), captured)
+    }
+
+    fn test_record(remark: Option<String>) -> ProviderRecord {
+        ProviderRecord {
+            provider_record_id: "1".into(),
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: Some("default".into()),
+            proxied: None,
+            enabled: true,
+            remark,
+            weight: None,
+            priority: None,
+        }
+    }
+
+    /// 创建后与每次修改后调用 UpdateDomainRecordRemark；空串清除备注。
+    #[tokio::test]
+    async fn create_and_update_write_remark_including_empty() {
+        let (base, captured) = spawn_capture().await;
+        let p = AliyunProvider::new(AliyunCredentials {
+            access_key_id: "id".into(),
+            access_key_secret: "key".into(),
+        })
+        .with_endpoint(&base);
+        let zone = ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: String::new(),
+        };
+        let input = RecordInput {
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: None,
+            proxied: None,
+            remark: Some("prod".into()),
+            weight: None,
+            priority: None,
+        };
+        p.create_record(&zone, &input).await.unwrap();
+        p.update_record(&zone, &test_record(Some("updated".into())))
+            .await
+            .unwrap();
+        p.update_record(&zone, &test_record(Some(String::new())))
+            .await
+            .unwrap();
+
+        let reqs = captured.lock().await;
+        assert_eq!(reqs[0]["Action"], "AddDomainRecord");
+        assert_eq!(reqs[1]["Action"], "UpdateDomainRecordRemark");
+        assert_eq!(reqs[1]["Remark"], "prod");
+        assert_eq!(reqs[2]["Action"], "UpdateDomainRecord");
+        assert_eq!(reqs[3]["Action"], "UpdateDomainRecordRemark");
+        assert_eq!(reqs[3]["Remark"], "updated");
+        assert_eq!(reqs[5]["Action"], "UpdateDomainRecordRemark");
+        assert_eq!(reqs[5]["Remark"], "", "清空备注需下发空串");
     }
 }

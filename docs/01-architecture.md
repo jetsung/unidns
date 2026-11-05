@@ -77,8 +77,8 @@ pub trait DnsProvider: Send + Sync {
 - `accounts`：平台账户。`provider_type` 受 CHECK 约束（七值枚举，含 `volcengine`），
   `credentials_enc` 为 AES-256-GCM 密文（nonce 前置），`credentials_mask`
   存打码展示串。
-- `domains`：同步下来的域名，`UNIQUE(account_id, name)`；`remark` 为本地备注，
-  不回写平台。
+- `domains`：同步下来的域名，`UNIQUE(account_id, name)`；`remark` 为域名备注，
+  阿里云、DNSPod（国内/国际站）、火山引擎回写上游，其余平台仅本地保存。
 - `records`：解析记录，含上游 `provider_record_id` 便于回写；
   `pending_sync` 标记待同步变更；`weight`/`priority` 为 EdgeOne 适用字段，
   其他平台为 NULL。

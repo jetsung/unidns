@@ -144,6 +144,10 @@ impl CloudflareProvider {
 
 #[async_trait]
 impl DnsProvider for CloudflareProvider {
+    fn supports_record_remark(&self) -> bool {
+        true
+    }
+
     async fn verify(&self) -> Result<(), ProviderError> {
         self.request(reqwest::Method::GET, "/zones?per_page=1", None)
             .await?;
@@ -443,5 +447,81 @@ mod tests {
             .unwrap();
         let err = rt.block_on(f).unwrap_err();
         assert!(matches!(err, ProviderError::Unsupported(_)));
+    }
+
+    type Captured = std::sync::Arc<tokio::sync::Mutex<Vec<(String, Value)>>>;
+
+    async fn capture_handler(
+        axum::extract::State(captured): axum::extract::State<Captured>,
+        method: axum::http::Method,
+        body: axum::body::Bytes,
+    ) -> axum::Json<Value> {
+        let v: Value = if body.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&body).unwrap_or(Value::Null)
+        };
+        captured.lock().await.push((method.to_string(), v.clone()));
+        let mut result = json!({
+            "id": "rec1", "type": "A", "name": "www.example.com",
+            "content": "1.2.3.4", "ttl": 600, "proxied": false
+        });
+        if let Some(comment) = v.get("comment") {
+            result["comment"] = comment.clone();
+        }
+        axum::Json(json!({"success": true, "result": result}))
+    }
+
+    async fn spawn_capture() -> (String, Captured) {
+        let captured: Captured = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/zones/{zone_id}/dns_records", any(capture_handler))
+            .route(
+                "/zones/{zone_id}/dns_records/{record_id}",
+                any(capture_handler),
+            )
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), captured)
+    }
+
+    /// 创建携带 comment；修改时 comment 空串表示清除备注。
+    #[tokio::test]
+    async fn create_and_update_carry_remark() {
+        let (base, captured) = spawn_capture().await;
+        let p = provider(&base);
+        let zone = ProviderZone {
+            name: "example.com".into(),
+            provider_domain_id: "zone1".into(),
+        };
+        let input = RecordInput {
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "1.2.3.4".into(),
+            ttl: 600,
+            line: None,
+            proxied: None,
+            remark: Some("生产".into()),
+            weight: None,
+            priority: None,
+        };
+        let created = p.create_record(&zone, &input).await.unwrap();
+        assert_eq!(created.remark.as_deref(), Some("生产"));
+        {
+            let reqs = captured.lock().await;
+            assert_eq!(reqs[0].0, "POST");
+            assert_eq!(reqs[0].1["comment"], "生产");
+        }
+
+        let mut record = created;
+        record.remark = Some(String::new());
+        p.update_record(&zone, &record).await.unwrap();
+        {
+            let reqs = captured.lock().await;
+            assert_eq!(reqs[1].0, "PUT");
+            assert_eq!(reqs[1].1["comment"], "", "清空备注需下发空 comment");
+        }
     }
 }

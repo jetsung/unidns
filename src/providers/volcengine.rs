@@ -152,6 +152,24 @@ impl VolcengineProvider {
             "火山引擎未找到域名 {domain_name}"
         )))
     }
+
+    /// QueryZone 读取域名权威状态：(Stage, IsNSCorrect)。
+    async fn query_zone_status(
+        &self,
+        zid: &str,
+    ) -> Result<(Option<i64>, Option<bool>), ProviderError> {
+        let mut params = BTreeMap::new();
+        params.insert("ZID".into(), zid.to_string());
+        let body = self.call_get("QueryZone", params).await?;
+        let result = body.pointer("/Result").ok_or_else(|| ProviderError::Api {
+            code: "BadResponse".into(),
+            message: "火山引擎 QueryZone 未返回 Result".into(),
+        })?;
+        Ok((
+            result.get("Stage").and_then(value_as_i64),
+            result.get("IsNSCorrect").and_then(|v| v.as_bool()),
+        ))
+    }
 }
 
 // ---------- V4 签名（HMAC-SHA256） ----------
@@ -306,27 +324,26 @@ fn map_error(err: &Value) -> ProviderError {
     }
 }
 
-/// Stage → 统一域名状态：0=正常(enable)、1=待找回(pending)、其余原值透传。
-fn stage_to_status(stage: i64) -> String {
+fn value_as_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+}
+
+/// QueryZone 状态判定：Stage 0 且 NS 未判定为错误时正常，其余一律异常。
+fn zone_status(stage: Option<i64>, ns_correct: Option<bool>) -> &'static str {
     match stage {
-        0 => "enable".into(),
-        1 => "pending".into(),
-        other => other.to_string(),
+        Some(0) if ns_correct != Some(false) => "enable",
+        _ => "error",
     }
 }
 
 fn parse_domain(v: &Value) -> Option<ProviderDomain> {
-    // ListZones 实际响应不含 Stage（设计阶段的文档口径），状态字段为 CacheStage；
-    // 两者都缺时按"已托管即正常"兜底为 0（与 CloudFlare/阿里云行为一致）。
-    let stage = v
-        .get("Stage")
-        .and_then(|s| s.as_i64())
-        .or_else(|| v.get("CacheStage").and_then(|s| s.as_i64()))
-        .unwrap_or(0);
+    // ListZones 的 CacheStage 不反映域名当前接入状态（实测未设置 NS 时为 0），
+    // 状态一律由 QueryZone 判定；未查询前不得视为正常。
     Some(ProviderDomain {
         name: v.get("ZoneName")?.as_str()?.to_string(),
         provider_domain_id: v.get("ZID")?.as_i64()?.to_string(),
-        status: stage_to_status(stage),
+        status: "error".into(),
         remark: v
             .get("Remark")
             .and_then(|r| r.as_str())
@@ -357,6 +374,10 @@ fn parse_record(v: &Value) -> Option<ProviderRecord> {
 
 #[async_trait]
 impl DnsProvider for VolcengineProvider {
+    fn supports_record_remark(&self) -> bool {
+        true
+    }
+
     async fn verify(&self) -> Result<(), ProviderError> {
         let mut params = BTreeMap::new();
         params.insert("PageSize".into(), "1".into());
@@ -385,6 +406,21 @@ impl DnsProvider for VolcengineProvider {
                 break;
             }
             page += 1;
+        }
+        for domain in &mut domains {
+            match self.query_zone_status(&domain.provider_domain_id).await {
+                Ok((stage, ns_correct)) => {
+                    domain.status = zone_status(stage, ns_correct).to_string();
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        domain = %domain.name,
+                        error = %e,
+                        "火山引擎 QueryZone 失败，域名状态按异常处理"
+                    );
+                    domain.status = "error".into();
+                }
+            }
         }
         Ok(domains)
     }
@@ -520,7 +556,8 @@ impl DnsProvider for VolcengineProvider {
             "Value": record.value,
             "TTL": record.ttl,
         });
-        if let Some(r) = record.remark.as_deref().filter(|r| !r.is_empty()) {
+        if let Some(r) = record.remark.as_deref() {
+            // 空串同样下发，实现清除平台备注
             body["Remark"] = Value::String(r.to_string());
         }
         self.call_post("UpdateRecord", body).await?;
@@ -587,9 +624,8 @@ impl DnsProvider for VolcengineProvider {
             "Host": host,
             "Line": line,
         });
-        if !remark.is_empty() {
-            update["Remark"] = Value::String(remark.to_string());
-        }
+        // 空串同样下发，实现清除平台备注
+        update["Remark"] = Value::String(remark.to_string());
         self.call_post("UpdateRecord", update).await?;
         Ok(())
     }
@@ -731,44 +767,38 @@ mod tests {
     }
 
     #[test]
-    fn stage_mapping() {
-        assert_eq!(stage_to_status(0), "enable");
-        assert_eq!(stage_to_status(1), "pending");
-        assert_eq!(stage_to_status(2), "2");
-        assert_eq!(stage_to_status(3), "3");
-        assert_eq!(stage_to_status(5), "5");
+    fn zone_status_mapping() {
+        assert_eq!(zone_status(Some(0), Some(true)), "enable");
+        assert_eq!(zone_status(Some(0), None), "enable");
+        assert_eq!(zone_status(Some(0), Some(false)), "error", "NS 不正确");
+        for stage in [1, 2, 3, 5] {
+            assert_eq!(zone_status(Some(stage), Some(true)), "error");
+        }
+        assert_eq!(
+            zone_status(None, Some(true)),
+            "error",
+            "Stage 缺失不得视为正常"
+        );
+        assert_eq!(zone_status(None, None), "error");
     }
 
     #[test]
     fn domain_parsing() {
-        // 实际响应含 CacheStage（无 Stage）
+        // ListZones 的 CacheStage 不参与状态判定，状态由 QueryZone 覆盖
         let v = serde_json::json!({
             "ZID": 12345, "ZoneName": "example.com", "CacheStage": 0, "Remark": ""
         });
         let d = parse_domain(&v).unwrap();
         assert_eq!(d.name, "example.com");
         assert_eq!(d.provider_domain_id, "12345");
-        assert_eq!(d.status, "enable");
+        assert_eq!(d.status, "error", "未查询 QueryZone 前不得视为正常");
         assert_eq!(d.remark, None, "空串备注应归一为 None");
 
-        // 设计口径的 Stage 字段若存在则优先
-        let pending = parse_domain(&serde_json::json!({
-            "ZID": 1, "ZoneName": "a.com", "Stage": 1, "Remark": "备注"
+        let remarked = parse_domain(&serde_json::json!({
+            "ZID": 1, "ZoneName": "a.com", "Remark": "备注"
         }))
         .unwrap();
-        assert_eq!(pending.status, "pending");
-        assert_eq!(pending.remark.as_deref(), Some("备注"));
-
-        // Stage 缺失时回退 CacheStage 透传
-        let cache = parse_domain(&serde_json::json!({
-            "ZID": 2, "ZoneName": "b.com", "CacheStage": 3
-        }))
-        .unwrap();
-        assert_eq!(cache.status, "3");
-
-        // 两者都缺：按"已托管即正常"兜底（与 CloudFlare/阿里云一致）
-        let bare = parse_domain(&serde_json::json!({"ZID": 3, "ZoneName": "c.com"})).unwrap();
-        assert_eq!(bare.status, "enable");
+        assert_eq!(remarked.remark.as_deref(), Some("备注"));
     }
 
     #[test]
@@ -879,23 +909,111 @@ mod tests {
 
     #[tokio::test]
     async fn list_zones_uses_paging_params() {
-        let server = MockServer::start(vec![serde_json::json!({
-            "ResponseMetadata": {"RequestId": "r1"},
-            "Result": {"Total": 1, "Zones": [
-                {"ZID": 12345, "ZoneName": "example.com", "Stage": 0, "Remark": ""}
-            ]}
-        })]);
+        let server = MockServer::start(vec![
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r1"},
+                "Result": {"Total": 1, "Zones": [
+                    {"ZID": 12345, "ZoneName": "example.com", "Remark": ""}
+                ]}
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r2"},
+                "Result": {"Stage": 0, "IsNSCorrect": true}
+            }),
+        ]);
         let p = provider_at(&server.url);
         let domains = p.list_domains().await.unwrap();
         assert_eq!(domains.len(), 1);
         assert_eq!(domains[0].provider_domain_id, "12345");
+        assert_eq!(domains[0].status, "enable");
         let reqs = server.take();
-        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs.len(), 2);
         assert!(
             reqs[0].contains("GET /?Action=ListZones&PageNumber=1&PageSize=500&Version=2018-08-01"),
             "ListZones 翻页参数: {}",
             reqs[0]
         );
+        assert!(
+            reqs[1].contains("GET /?Action=QueryZone&Version=2018-08-01&ZID=12345"),
+            "QueryZone 参数: {}",
+            reqs[1]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_domains_uses_query_zone_status() {
+        let server = MockServer::start(vec![
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r1"},
+                "Result": {"Total": 2, "Zones": [
+                    {"ZID": 1, "ZoneName": "ok.com"},
+                    {"ZID": 2, "ZoneName": "demo.gcli.cn"}
+                ]}
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r2"},
+                "Result": {"Stage": 0, "IsNSCorrect": true}
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r3"},
+                "Result": {"Stage": 2, "IsNSCorrect": false}
+            }),
+        ]);
+        let p = provider_at(&server.url);
+        let domains = p.list_domains().await.unwrap();
+        assert_eq!(domains.len(), 2);
+        assert_eq!(domains[0].status, "enable");
+        assert_eq!(domains[1].status, "error", "未设置 NS 应判为异常");
+
+        let reqs = server.take();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[1].contains("Action=QueryZone") && reqs[1].contains("ZID=1"));
+        assert!(reqs[2].contains("Action=QueryZone") && reqs[2].contains("ZID=2"));
+    }
+
+    #[tokio::test]
+    async fn query_zone_failure_only_affects_that_domain() {
+        let server = MockServer::start(vec![
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r1"},
+                "Result": {"Total": 2, "Zones": [
+                    {"ZID": 1, "ZoneName": "broken.com"},
+                    {"ZID": 2, "ZoneName": "ok.com"}
+                ]}
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {
+                    "RequestId": "r2",
+                    "Error": {"Code": "ErrZoneNotFound", "Message": "zone not found"}
+                }
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r3"},
+                "Result": {"Stage": 0, "IsNSCorrect": true}
+            }),
+        ]);
+        let p = provider_at(&server.url);
+        let domains = p.list_domains().await.unwrap();
+        assert_eq!(domains.len(), 2);
+        assert_eq!(domains[0].status, "error", "查询失败的域名按异常处理");
+        assert_eq!(domains[1].status, "enable", "其余域名不受影响");
+    }
+
+    #[tokio::test]
+    async fn query_zone_missing_stage_is_error() {
+        let server = MockServer::start(vec![
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r1"},
+                "Result": {"Total": 1, "Zones": [{"ZID": 9, "ZoneName": "x.com"}]}
+            }),
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r2"},
+                "Result": {"IsNSCorrect": true}
+            }),
+        ]);
+        let p = provider_at(&server.url);
+        let domains = p.list_domains().await.unwrap();
+        assert_eq!(domains[0].status, "error", "Stage 缺失不得兜底为正常");
     }
 
     #[tokio::test]
@@ -1034,6 +1152,48 @@ mod tests {
             "QueryRecord 线路为空时回填 default"
         );
         assert_eq!(body["Remark"], "新备注");
+    }
+
+    #[tokio::test]
+    async fn update_record_sends_empty_remark_to_clear() {
+        let server = MockServer::start(vec![
+            serde_json::json!({"ResponseMetadata": {"RequestId": "r1"}, "Result": {}}),
+        ]);
+        let p = provider_at(&server.url);
+        let record = ProviderRecord {
+            provider_record_id: "rec-1".into(),
+            host: "www".into(),
+            rtype: "A".into(),
+            value: "5.6.7.8".into(),
+            ttl: 300,
+            line: Some("default".into()),
+            proxied: None,
+            enabled: true,
+            remark: Some(String::new()),
+            weight: None,
+            priority: None,
+        };
+        p.update_record(&zone(), &record).await.unwrap();
+        let body: Value =
+            serde_json::from_str(server.take()[0].split('\n').nth(1).unwrap()).unwrap();
+        assert_eq!(body["Remark"], "", "清空备注需下发空串");
+    }
+
+    #[tokio::test]
+    async fn set_record_remark_empty_sends_empty_string() {
+        let server = MockServer::start(vec![
+            serde_json::json!({
+                "ResponseMetadata": {"RequestId": "r1"},
+                "Result": {"RecordID": "rec-1", "Host": "www", "Line": "default", "Type": "A",
+                           "Value": "1.2.3.4", "TTL": 600, "Enable": true}
+            }),
+            serde_json::json!({"ResponseMetadata": {"RequestId": "r2"}, "Result": {}}),
+        ]);
+        let p = provider_at(&server.url);
+        p.set_record_remark(&zone(), "rec-1", "").await.unwrap();
+        let body: Value =
+            serde_json::from_str(server.take()[1].split('\n').nth(1).unwrap()).unwrap();
+        assert_eq!(body["Remark"], "", "清空备注需下发空串");
     }
 
     #[tokio::test]

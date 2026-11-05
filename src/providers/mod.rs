@@ -122,7 +122,7 @@ pub struct ProviderRecord {
     /// CloudFlare 代理状态；其他平台为 None。
     pub proxied: Option<bool>,
     pub enabled: bool,
-    /// 备注（阿里云 / DNSPod / CloudFlare 支持；EdgeOne 无）。
+    /// 备注（阿里云 / DNSPod / CloudFlare / 火山引擎支持；EdgeOne 仅本地保存）。
     pub remark: Option<String>,
     /// 权重（EdgeOne 适用，-1~100，-1 表示未设置）；其他平台为 None。
     pub weight: Option<i64>,
@@ -174,6 +174,11 @@ pub(crate) fn host_to_fqdn(host: &str, zone: &str) -> String {
 /// 列表方法在适配器内部消化分页，一次返回全量。
 #[async_trait]
 pub trait DnsProvider: Send + Sync {
+    /// 上游是否提供解析记录备注字段。为 false 时备注仅保存在本地。
+    fn supports_record_remark(&self) -> bool {
+        false
+    }
+
     /// 最小只读调用，用于凭据连通性验证。
     async fn verify(&self) -> Result<(), ProviderError>;
     async fn list_domains(&self) -> Result<Vec<ProviderDomain>, ProviderError>;
@@ -575,5 +580,34 @@ mod tests {
         let input: RecordInput =
             serde_json::from_str(r#"{"host":"www","rtype":"A","value":"1.2.3.4"}"#).unwrap();
         assert_eq!(input.ttl, 600);
+    }
+
+    #[test]
+    fn record_remark_capability_by_provider() {
+        let aliyun = r#"{"access_key_id":"ak","access_key_secret":"sk"}"#;
+        let tencent = r#"{"secret_id":"id","secret_key":"key"}"#;
+        let cases = [
+            (ProviderType::Aliyun, aliyun, true),
+            (ProviderType::Dnspod, tencent, true),
+            (ProviderType::DnspodIntl, tencent, true),
+            (ProviderType::Cloudflare, r#"{"api_token":"token"}"#, true),
+            (ProviderType::Volcengine, aliyun, true),
+            (ProviderType::Edgeone, tencent, false),
+            (ProviderType::EdgeoneIntl, tencent, false),
+        ];
+        for (ptype, cred, expected) in cases {
+            let provider = build_provider(ptype, cred, None).unwrap();
+            assert_eq!(
+                provider.supports_record_remark(),
+                expected,
+                "{}",
+                ptype.as_str()
+            );
+        }
+
+        let mock = mock::MockProvider::default();
+        assert!(mock.supports_record_remark());
+        mock.disable_record_remark();
+        assert!(!mock.supports_record_remark());
     }
 }

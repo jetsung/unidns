@@ -693,12 +693,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_preserves_local_remark() {
+    async fn sync_remark_prefers_local_and_fills_empty() {
         let (state, mocks) = test_app_with_multi_mock().await;
         let mock_a = mocks.get("a").unwrap().clone();
         {
             let mut guard = mock_a.state.lock().await;
-            // rec-1 无平台备注（模拟 EdgeOne/CloudFlare 的 None 场景），rec-2 带平台备注「演示备注」
+            // rec-1 无平台备注，rec-2 带平台备注「演示备注」
             *guard = MockState::default().with_zone("remark.com");
         }
         let app = router(state.clone());
@@ -754,7 +754,7 @@ mod tests {
         let run_id = body_json(res).await["run_id"].as_i64().unwrap();
         assert_eq!(wait_run_done(&state, run_id).await, "success");
 
-        // 本地非空备注不被平台覆盖；本地空备注记录重新采用平台值
+        // 本地备注优先：本地非空保留，本地为空时以上游填充
         let remarks: Vec<String> = sqlx::query_scalar(
             "SELECT remark FROM records WHERE domain_id = (SELECT id FROM domains WHERE name = 'remark.com') ORDER BY provider_record_id",
         )
@@ -762,8 +762,49 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(remarks.len(), 2);
-        assert_eq!(remarks[0], "本地保护备注", "本地非空备注不得被平台覆盖");
-        assert_eq!(remarks[1], "平台已改动", "本地空备注记录应重新采用平台值");
+        assert_eq!(remarks[0], "本地保护备注", "本地备注非空时不应被上游覆盖");
+        assert_eq!(remarks[1], "平台已改动", "本地备注为空时应以上游填充");
+
+        // 不支持备注的平台：上游不提供备注，本地保持
+        mock_a.disable_record_remark();
+        sqlx::query("UPDATE records SET remark = '本地保护备注' WHERE provider_record_id = 'rec-remark.com-1'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE records SET remark = '' WHERE provider_record_id = 'rec-remark.com-2'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        {
+            let mut guard = mock_a.state.lock().await;
+            let list = guard.records.get_mut("remark.com").unwrap();
+            list[0].remark = None;
+            list[1].remark = None;
+        }
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        let run_id = body_json(res).await["run_id"].as_i64().unwrap();
+        assert_eq!(wait_run_done(&state, run_id).await, "success");
+        let r1: String = sqlx::query_scalar(
+            "SELECT remark FROM records WHERE provider_record_id = 'rec-remark.com-1'",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(r1, "本地保护备注", "上游无备注字段时应保留本地备注");
+        let r2: String = sqlx::query_scalar(
+            "SELECT remark FROM records WHERE provider_record_id = 'rec-remark.com-2'",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(r2, "", "上游无备注字段且本地为空时应保持为空");
     }
 
     #[tokio::test]
@@ -852,5 +893,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(local, "", "本地备注应清空");
+    }
+
+    /// 同步域名时本地备注为空则以上游备注填充（端到端：经 API 触发同步）。
+    #[tokio::test]
+    async fn domain_remark_sync_fills_empty_local_from_upstream() {
+        let (state, mocks) = test_app_with_multi_mock().await;
+        let mock_a = mocks.get("a").unwrap().clone();
+        {
+            let mut guard = mock_a.state.lock().await;
+            *guard = MockState::default().with_zone("domain-fill.com");
+            guard.domains[0].remark = Some("线上域名备注".into());
+        }
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+        let body = r#"{"name":"A","provider_type":"dnspod","credentials":{"secret_id":"id","secret_key":"key","mock_id":"a"}}"#;
+        let id = create_account(&app, &cookie, body).await;
+
+        // 首次同步：新域名携带上游备注入库
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 202);
+        let run_id = body_json(res).await["run_id"].as_i64().unwrap();
+        assert_eq!(wait_run_done(&state, run_id).await, "success");
+        let remark: String =
+            sqlx::query_scalar("SELECT remark FROM domains WHERE name = 'domain-fill.com'")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(remark, "线上域名备注", "新域名应携带上游备注");
+
+        // 本地非空备注保留，不被上游覆盖
+        sqlx::query("UPDATE domains SET remark = '本地备注' WHERE name = 'domain-fill.com'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        {
+            let mut guard = mock_a.state.lock().await;
+            guard.domains[0].remark = Some("线上新备注".into());
+        }
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 202);
+        let run_id = body_json(res).await["run_id"].as_i64().unwrap();
+        assert_eq!(wait_run_done(&state, run_id).await, "success");
+        let remark: String =
+            sqlx::query_scalar("SELECT remark FROM domains WHERE name = 'domain-fill.com'")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(remark, "本地备注", "本地非空备注应保留");
+
+        // 本地清空备注后再次同步：上游备注重新填充
+        sqlx::query("UPDATE domains SET remark = '' WHERE name = 'domain-fill.com'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let res = req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), 202);
+        let run_id = body_json(res).await["run_id"].as_i64().unwrap();
+        assert_eq!(wait_run_done(&state, run_id).await, "success");
+        let remark: String =
+            sqlx::query_scalar("SELECT remark FROM domains WHERE name = 'domain-fill.com'")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(remark, "线上新备注", "本地为空时应以上游备注填充");
     }
 }

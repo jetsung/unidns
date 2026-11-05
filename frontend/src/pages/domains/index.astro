@@ -4,7 +4,7 @@ import AppLayout from '../../components/AppLayout.astro';
 
 <AppLayout title="域名" active="domains">
   <script>
-    import { api, esc, fmtTime, toast, requireAuth, zoneStatusBadge, modalFrame, busy, pager, bindPager, copyText } from '../../lib/app.js';
+    import { api, esc, fmtTime, toast, requireAuth, zoneStatusBadge, modalFrame, busy, pager, bindPager, copyText, pollRun } from '../../lib/app.js';
 
     // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
     document.addEventListener('astro:page-load', () => {
@@ -41,13 +41,14 @@ import AppLayout from '../../components/AppLayout.astro';
       q.set('page_size', state.page_size);
       const { total, page, page_size, items } = await api('/api/v1/domains' + (q.toString() ? `?${q}` : ''));
 
-      // 状态列排序权重：正常 < 待生效 < 已暂停 < 未知
+      // 状态列排序权重：正常 < 待生效 < 已暂停 < 异常 < 未知
       function statusRank(s) {
         const v = String(s || '').trim().toLowerCase();
         if (['active', 'enable', 'enabled'].includes(v)) return 0;
         if (v === 'pending') return 1;
         if (['pause', 'paused', 'disable', 'disabled'].includes(v)) return 2;
-        return 3;
+        if (['error', 'abnormal', '2', '3', '5'].includes(v)) return 3;
+        return 4;
       }
       const SORTERS = {
         status: (a, b) => statusRank(a.status) - statusRank(b.status),
