@@ -23,7 +23,7 @@ import AppLayout from '../../components/AppLayout.astro';
     };
 
     let app;
-    const state = { keyword: '', provider: '', sort: { key: null, dir: 1 }, page: 1, page_size: 10 };
+    const state = { keyword: '', provider: '', sort: { key: null, dir: 1 }, page: 1, page_size: 10, selected: new Set() };
     async function init() {
       await requireAuth();
       app = document.getElementById('app');
@@ -63,6 +63,7 @@ import AppLayout from '../../components/AppLayout.astro';
       }
       const rows = sorted.map((d) => `
                 <tr>
+                  <td data-label="选中"><input type="checkbox" class="bulk-check" data-id="${d.id}" data-name="${esc(d.name)}" ${state.selected.has(d.id) ? 'checked' : ''} /></td>
                   <td data-label="域名"><a class="link-strong" href="/domains/detail?id=${d.id}" title="点击管理该域名的解析记录">${esc(d.name)}</a><button class="copy-btn" data-copy="${esc(d.name)}" title="复制域名" aria-label="复制域名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></td>
                   <td data-label="所属平台"><span class="badge provider">${esc(PROVIDER_LABELS[d.provider_type] || d.provider_type)}</span></td>
                   <td data-label="账户">${esc(d.account_name)}</td>
@@ -82,7 +83,7 @@ import AppLayout from '../../components/AppLayout.astro';
       const tableHtml = items.length === 0
         ? `<div class="empty"><div class="icon">🌐</div><div class="title">没有域名</div><div>请先在「平台账户」添加账户并执行同步</div></div>`
         : `<table>
-            <thead><tr><th>域名</th><th>所属平台</th><th>账户</th>${sortTh('record_count', '记录数')}${sortTh('status', '状态')}${sortTh('remark', '备注')}${sortTh('synced_at', '同步时间')}<th>操作</th></tr></thead>
+            <thead><tr><th style="width:36px"><input type="checkbox" id="bulk-check-all" title="全选（当页）" /></th><th>域名</th><th>所属平台</th><th>账户</th>${sortTh('record_count', '记录数')}${sortTh('status', '状态')}${sortTh('remark', '备注')}${sortTh('synced_at', '同步时间')}<th>操作</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>`;
 
@@ -107,10 +108,18 @@ import AppLayout from '../../components/AppLayout.astro';
           <button class="btn" id="f-apply">筛选</button>
           <span class="count">共 ${total} 个域名</span>
         </div>
+        <div class="bulk-toolbar ${state.selected.size ? '' : 'hidden'}" id="bulk-toolbar">
+          <span class="bulk-count">已选 <b>${state.selected.size}</b> 个域名</span>
+          <button class="btn" data-bulk="create">批量新增</button>
+          <button class="btn" data-bulk="set">批量修改</button>
+          <button class="btn danger" data-bulk="delete">批量删除</button>
+          <button class="btn" data-bulk="query">查询记录值</button>
+          <button class="btn" id="bulk-clear">取消选择</button>
+        </div>
         <div class="card card-table">${tableHtml}</div>
         ${pager({ total, page, page_size })}`;
 
-      bindPager((p) => { state.page = p; render(); }, (s) => { state.page_size = s; state.page = 1; render(); });
+      bindPager((p) => { state.page = p; state.selected.clear(); render(); }, (s) => { state.page_size = s; state.page = 1; state.selected.clear(); render(); });
 
       document.getElementById('f-apply').addEventListener('click', applyFilter);
       document.getElementById('f-keyword').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFilter(); });
@@ -134,6 +143,33 @@ import AppLayout from '../../components/AppLayout.astro';
           openRemarkModal(el.dataset.remark, el.dataset.name, el.dataset.remarkVal || '');
         });
       });
+      // 批量操作：勾选、全选、取消选择、工具栏入口
+      document.querySelectorAll('.bulk-check').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) state.selected.add(cb.dataset.id);
+          else state.selected.delete(cb.dataset.id);
+          updateBulkToolbar();
+        });
+      });
+      const checkAll = document.getElementById('bulk-check-all');
+      if (checkAll) {
+        checkAll.checked = state.selected.size > 0 && document.querySelectorAll('.bulk-check').length === state.selected.size;
+        checkAll.addEventListener('change', () => {
+          document.querySelectorAll('.bulk-check').forEach((cb) => {
+            cb.checked = checkAll.checked;
+            if (checkAll.checked) state.selected.add(cb.dataset.id);
+            else state.selected.delete(cb.dataset.id);
+          });
+          updateBulkToolbar();
+        });
+      }
+      document.getElementById('bulk-clear').addEventListener('click', () => {
+        state.selected.clear();
+        render();
+      });
+      document.querySelectorAll('[data-bulk]').forEach((btn) => {
+        btn.addEventListener('click', () => openBulkModal(btn.dataset.bulk));
+      });
       document.getElementById('sync-all-btn').addEventListener('click', async (e) => {
         e.target.disabled = true;
         try {
@@ -153,6 +189,7 @@ import AppLayout from '../../components/AppLayout.astro';
     }
 
     function applyFilter() {
+      state.selected.clear(); // 过滤条件变化时清空选中，避免跨页误操作
       const q = new URLSearchParams();
       const kw = document.getElementById('f-keyword').value.trim();
       const pv = document.getElementById('f-provider').value;
@@ -163,6 +200,118 @@ import AppLayout from '../../components/AppLayout.astro';
       state.page = 1;
       history.replaceState(null, '', '/domains' + (qs ? `?${qs}` : ''));
       render().catch((err) => toast(err.message, 'err'));
+    }
+
+    // 批量操作 ----
+
+    function updateBulkToolbar() {
+      const bar = document.getElementById('bulk-toolbar');
+      if (!bar) return;
+      bar.classList.toggle('hidden', state.selected.size === 0);
+      bar.querySelector('.bulk-count').innerHTML = `已选 <b>${state.selected.size}</b> 个域名`;
+    }
+
+    const BULK_OP_LABELS = { create: '批量新增', set: '批量修改', delete: '批量删除', query: '查询记录值' };
+
+    // 批量操作弹窗：create 含冲突策略；delete 走二次确认；query 不需要记录值
+    function openBulkModal(op) {
+      if (state.selected.size === 0) return toast('请先勾选域名', 'err');
+      const needValue = op !== 'query';
+      const needPolicy = op === 'create';
+      const body = `
+        <div class="bulk-form">
+          <label>主机记录（host，根记录为 @）<input id="bulk-host" class="input" placeholder="如 www 或 @" /></label>
+          <label>记录类型
+            <select id="bulk-rtype" class="input">
+              ${['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'].map((t) => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </label>
+          ${needValue ? `<label>记录值${op === 'delete' ? '（校验用）' : ''}<input id="bulk-value" class="input" placeholder="如 1.2.3.4" /></label>` : ''}
+          ${needValue ? `<label>TTL（秒，留空默认 600）<input id="bulk-ttl" class="input" type="number" min="1" max="86400" placeholder="600" /></label>` : ''}
+          ${needPolicy ? `<label>若域名已存在该记录
+            <select id="bulk-conflict" class="input">
+              <option value="skip">跳过（保留原记录）</option>
+              <option value="update">覆盖更新为本次提交的值</option>
+            </select>
+          </label>` : ''}
+        </div>`;
+
+      if (op === 'delete') {
+        // 二次确认弹窗：展示将影响的域名数量与主机记录信息，防止误删
+        const mask = modalFrame(`二次确认 · 批量删除`, `
+          <div class="bulk-confirm">
+            <p>即将对 <b>${state.selected.size}</b> 个域名执行批量删除：</p>
+            <p class="bulk-target">删除已填写主机记录与类型的记录，并实时回写各平台。<br/>该操作不可恢复，请确认。</p>
+            ${body}
+          </div>
+        `, `<button class="btn" data-close>取消</button><button class="btn danger" id="bulk-submit">确认删除</button>`);
+        mask.querySelector('#bulk-submit').addEventListener('click', async (e) => {
+          const host = mask.querySelector('#bulk-host').value.trim();
+          const rtype = mask.querySelector('#bulk-rtype').value;
+          const value = mask.querySelector('#bulk-value').value.trim();
+          await busy(e.target, async () => {
+            try {
+              const r = await runBulk('delete', host, rtype, value, null, null);
+              mask.remove();
+              showBulkResult(r, op);
+            } catch (err) { toast(err.message, 'err'); }
+          });
+        });
+        return;
+      }
+
+      const mask = modalFrame(`${BULK_OP_LABELS[op]} · 已选 ${state.selected.size} 个域名`, body,
+        `<button class="btn" data-close>取消</button><button class="btn primary" id="bulk-submit">执行</button>`);
+      mask.querySelector('#bulk-submit').addEventListener('click', async (e) => {
+        const host = mask.querySelector('#bulk-host').value.trim();
+        const rtype = mask.querySelector('#bulk-rtype').value;
+        const value = needValue ? mask.querySelector('#bulk-value').value.trim() : '';
+        const ttlRaw = needValue ? mask.querySelector('#bulk-ttl').value : '';
+        const ttl = ttlRaw ? parseInt(ttlRaw, 10) : null;
+        const onConflict = needPolicy ? mask.querySelector('#bulk-conflict').value : null;
+        await busy(e.target, async () => {
+          try {
+            const r = await runBulk(op, host, rtype, value, ttl, onConflict);
+            mask.remove();
+            showBulkResult(r, op);
+          } catch (err) { toast(err.message, 'err'); }
+        });
+      });
+    }
+
+    async function runBulk(op, host, rtype, value, ttl, onConflict) {
+      const body = { op, domain_ids: [...state.selected].map(Number), host, rtype };
+      if (op !== 'query') body.value = value;
+      if (ttl) body.ttl = ttl;
+      if (onConflict) body.on_conflict = onConflict;
+      return await api('/api/v1/records/batch', { method: 'POST', body });
+    }
+
+    // 批量结果弹窗：汇总统计 + 逐域名结果；关闭后刷新列表
+    function showBulkResult(r, op) {
+      const s = r.summary || {};
+      const statusLabels = {
+        created: '已创建', updated: '已更新', deleted: '已删除', skipped: '已跳过',
+        not_found: '未找到', failed: '失败', ok: '成功',
+      };
+      const rows = (r.results || []).map((it) => {
+        const label = statusLabels[it.status] || it.status;
+        const reason = it.reason ? ` — ${esc(it.reason)}` : '';
+        const recs = (it.records || []).map((rec) => `${esc(rec.rtype)} ${esc(rec.host)} = ${esc(rec.value)}（TTL ${rec.ttl}）`).join('<br/>');
+        return `<li><span class="badge ${it.status === 'failed' ? 'err' : 'ok'}">${label}</span> ${esc(it.domain || `#${it.domain_id}`)}${reason}${recs ? `<div class="bulk-recs">${recs}</div>` : ''}</li>`;
+      }).join('');
+      const mask = modalFrame(`${BULK_OP_LABELS[op] || op} · 结果`, `
+        <div class="bulk-summary">
+          共 ${s.total ?? (r.results || []).length} 个域名：
+          ${['created', 'updated', 'deleted', 'skipped', 'not_found', 'failed']
+            .filter((k) => s[k])
+            .map((k) => `<span>${statusLabels[k]} ${s[k]}</span>`).join('')}
+        </div>
+        <ul class="bulk-results">${rows}</ul>
+      `, `<button class="btn primary" data-close>关闭</button>`);
+      mask.addEventListener('click', (e) => {
+        if (e.target.hasAttribute('data-close') || e.target.closest('[data-close]')) render();
+      });
     }
 
     // 备注弹窗：编辑域名本地备注（不回写平台）

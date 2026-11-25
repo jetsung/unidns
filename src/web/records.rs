@@ -452,7 +452,13 @@ pub async fn update_record(
     {
         return Err(AppError::BadRequest("至少提供一个要修改的字段".into()));
     }
-    let (record, domain, account) = load_record(&state, id).await?;
+    do_update_record(&state, id, update).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 修改单条记录并回写平台（update_record 与批量操作共用）。
+async fn do_update_record(state: &SharedState, id: i64, update: RecordUpdate) -> ApiResult<()> {
+    let (record, domain, account) = load_record(state, id).await?;
     if !account.enabled() {
         return Err(AppError::BadRequest(
             "所属账户已停用，无法操作解析记录".into(),
@@ -471,7 +477,7 @@ pub async fn update_record(
         priority: merged.priority,
     })?;
     check_volcengine_remark(account.provider_type(), merged.remark.as_deref())?;
-    let provider = build_provider_for_account(&state, &account)?;
+    let provider = build_provider_for_account(state, &account)?;
     let supports_remark = provider.supports_record_remark();
     match provider.update_record(&zone_of(&domain), &merged).await {
         // 以适配器返回值写库，确保 EdgeOne 的归一结果（line 为空等）落盘
@@ -499,11 +505,11 @@ pub async fn update_record(
             .execute(&state.pool)
             .await?;
             tracing::info!(record_id = id, "修改解析记录并回写平台");
-            Ok(StatusCode::NO_CONTENT)
+            Ok(())
         }
         // 平台侧记录已不存在：返回失败并标记待同步，等待下次同步修复
         Err(crate::providers::ProviderError::NotFound(m)) => {
-            mark_pending_sync(&state, id).await;
+            mark_pending_sync(state, id).await;
             Err(AppError::BadRequest(format!(
                 "记录在平台侧不存在（{m}），已标记待同步，下次同步将自动对齐"
             )))
@@ -580,6 +586,289 @@ pub async fn delete_record(
         }
         Err(e) => Err(e.into()),
     }
+}
+
+// ---------- 批量操作 ----------
+
+/// 批量记录操作类型。
+#[derive(Clone, Copy, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BulkOp {
+    /// 增：按冲突策略新增
+    Create,
+    /// 删：精确匹配删除
+    Delete,
+    /// 改：upsert（存在即更新、不存在即新增）
+    Set,
+    /// 查：主机记录完全匹配查询
+    Query,
+}
+
+#[derive(Deserialize)]
+pub struct BulkRecordRequest {
+    pub op: BulkOp,
+    pub domain_ids: Vec<i64>,
+    pub host: String,
+    /// 查询操作可选；其余操作必填
+    pub rtype: Option<String>,
+    pub value: Option<String>,
+    pub ttl: Option<u64>,
+    /// 仅 create 使用：skip（默认）| update
+    pub on_conflict: Option<String>,
+}
+
+/// 批量操作单域名结果。
+fn bulk_result(
+    domain: &DomainRow,
+    status: &str,
+    reason: Option<String>,
+    records: Vec<Value>,
+) -> Value {
+    json!({
+        "domain_id": domain.id,
+        "domain": domain.name,
+        "status": status,
+        "reason": reason,
+        "records": records,
+    })
+}
+
+/// POST /api/v1/records/batch —— 跨域名批量解析记录操作（增/删/改/查）。
+pub async fn bulk_records(
+    State(state): State<SharedState>,
+    ApiJson(req): ApiJson<BulkRecordRequest>,
+) -> ApiResult<Json<Value>> {
+    // 请求级校验：任一非法即整体拒绝，不执行任何域名操作
+    if req.domain_ids.is_empty() {
+        return Err(AppError::BadRequest("domain_ids 不能为空".into()));
+    }
+    if req.domain_ids.len() > 200 {
+        return Err(AppError::BadRequest(
+            "domain_ids 单次最多 200 个域名".into(),
+        ));
+    }
+    if req.host.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "主机记录（host）不能为空，根记录请使用 @".into(),
+        ));
+    }
+    let need_rtype = !matches!(req.op, BulkOp::Query);
+    let rtype = req.rtype.clone().unwrap_or_default();
+    if need_rtype {
+        if rtype.is_empty() {
+            return Err(AppError::BadRequest("记录类型（rtype）不能为空".into()));
+        }
+        if !ALLOWED_TYPES.contains(&rtype.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "不支持的记录类型 {rtype}，允许: {}",
+                ALLOWED_TYPES.join("/")
+            )));
+        }
+    }
+    let is_write = matches!(req.op, BulkOp::Create | BulkOp::Set | BulkOp::Delete);
+    if is_write && req.value.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        return Err(AppError::BadRequest("记录值（value）不能为空".into()));
+    }
+    let on_conflict = match req.on_conflict.as_deref() {
+        None | Some("skip") => "skip",
+        Some("update") => "update",
+        Some(other) => {
+            return Err(AppError::BadRequest(format!(
+                "不支持的冲突策略 {other}，允许: skip/update"
+            )));
+        }
+    };
+
+    let mut results = Vec::with_capacity(req.domain_ids.len());
+    for domain_id in &req.domain_ids {
+        let result = bulk_apply_to_domain(&state, &req, &rtype, on_conflict, *domain_id).await;
+        match result {
+            Ok(v) => results.push(v),
+            // 域名级硬错误（加载失败等）：记录失败，继续处理其余域名
+            Err(e) => {
+                // 域名级硬错误（加载失败等）：记录失败，继续处理其余域名
+                results.push(json!({
+                    "domain_id": domain_id,
+                    "domain": null,
+                    "status": "failed",
+                    "reason": e.to_string(),
+                    "records": [],
+                }));
+            }
+        }
+    }
+    let count = |s: &str| results.iter().filter(|r| r["status"] == s).count();
+    let summary = json!({
+        "total": results.len(),
+        "created": count("created"),
+        "updated": count("updated"),
+        "deleted": count("deleted"),
+        "skipped": count("skipped"),
+        "not_found": count("not_found"),
+        "failed": count("failed"),
+    });
+    Ok(Json(
+        json!({"op": req.op, "summary": summary, "results": results}),
+    ))
+}
+
+/// 对单个域名执行批量操作；Err 仅表示该域名无法处理（如域名不存在）。
+async fn bulk_apply_to_domain(
+    state: &SharedState,
+    req: &BulkRecordRequest,
+    rtype: &str,
+    on_conflict: &str,
+    domain_id: i64,
+) -> ApiResult<Value> {
+    let (domain, account) = load_domain(state, domain_id).await?;
+    let host = req.host.trim();
+    let value = req.value.as_deref().unwrap_or("").trim().to_string();
+    let ttl = req.ttl.unwrap_or(600);
+
+    // 查找精确匹配（host 完全相等）的记录；rtype 为空表示不限类型（仅查询）
+    let find_matching = |include_rtype: bool| {
+        let filter_rtype = if include_rtype { Some(rtype) } else { None };
+        async move {
+            match filter_rtype {
+                Some(rt) => {
+                    sqlx::query_as::<_, RecordRow>(
+                        "SELECT * FROM records WHERE domain_id = ? AND host = ? AND rtype = ? ORDER BY id",
+                    )
+                    .bind(domain_id)
+                    .bind(host)
+                    .bind(rt)
+                    .fetch_all(&state.pool)
+                    .await
+                }
+                None => {
+                    sqlx::query_as::<_, RecordRow>(
+                        "SELECT * FROM records WHERE domain_id = ? AND host = ? ORDER BY id",
+                    )
+                    .bind(domain_id)
+                    .bind(host)
+                    .fetch_all(&state.pool)
+                    .await
+                }
+            }
+        }
+    };
+
+    match req.op {
+        BulkOp::Query => {
+            let records = find_matching(false).await?;
+            let items = records
+                .iter()
+                .map(|r| record_json(r, &domain, &account))
+                .collect::<Vec<_>>();
+            Ok(bulk_result(&domain, "ok", None, items))
+        }
+        BulkOp::Delete => {
+            let records = find_matching(true).await?;
+            let Some(record) = records.first() else {
+                return Ok(bulk_result(&domain, "not_found", None, vec![]));
+            };
+            delete_record_row(state, &domain, record).await?;
+            Ok(bulk_result(&domain, "deleted", None, vec![]))
+        }
+        BulkOp::Create | BulkOp::Set => {
+            let records = find_matching(true).await?;
+            if let Some(existing) = records.first() {
+                if matches!(req.op, BulkOp::Create) && on_conflict == "skip" {
+                    return Ok(bulk_result(&domain, "skipped", None, vec![]));
+                }
+                if records.len() > 1 {
+                    // 多值记录：仅更新第一条，原因中标注
+                }
+                let reason = (records.len() > 1).then(|| {
+                    format!(
+                        "该域名下存在 {} 条同主机同类型记录，仅更新了第一条",
+                        records.len()
+                    )
+                });
+                do_update_record(
+                    state,
+                    existing.id,
+                    RecordUpdate {
+                        value: Some(value),
+                        ttl: Some(ttl),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                return Ok(bulk_result(&domain, "updated", reason, vec![]));
+            }
+            // 不存在：创建（set 与 create 均直接新增）
+            create_record_in_domain(state, &domain, host, rtype, &value, ttl).await?;
+            Ok(bulk_result(&domain, "created", None, vec![]))
+        }
+    }
+}
+
+/// 删除单条记录并回写平台（平台侧不存在时按幂等成功处理）。
+async fn delete_record_row(
+    state: &SharedState,
+    domain: &DomainRow,
+    record: &RecordRow,
+) -> ApiResult<()> {
+    let account = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE id = ?")
+        .bind(domain.account_id)
+        .fetch_one(&state.pool)
+        .await?;
+    if !account.enabled() {
+        return Err(AppError::BadRequest(
+            "所属账户已停用，无法操作解析记录".into(),
+        ));
+    }
+    let provider = build_provider_for_account(state, &account)?;
+    match provider
+        .delete_record(&zone_of(domain), &record.provider_record_id)
+        .await
+    {
+        Ok(()) | Err(crate::providers::ProviderError::NotFound(_)) => {
+            sqlx::query("DELETE FROM records WHERE id = ?")
+                .bind(record.id)
+                .execute(&state.pool)
+                .await?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// 在指定域名下创建记录并回写平台。
+async fn create_record_in_domain(
+    state: &SharedState,
+    domain: &DomainRow,
+    host: &str,
+    rtype: &str,
+    value: &str,
+    ttl: u64,
+) -> ApiResult<()> {
+    let account = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE id = ?")
+        .bind(domain.account_id)
+        .fetch_one(&state.pool)
+        .await?;
+    if !account.enabled() {
+        return Err(AppError::BadRequest(
+            "所属账户已停用，无法操作解析记录".into(),
+        ));
+    }
+    let input = RecordInput {
+        host: host.to_string(),
+        rtype: rtype.to_string(),
+        value: value.to_string(),
+        ttl,
+        line: None,
+        proxied: None,
+        remark: None,
+        weight: None,
+        priority: None,
+    };
+    validate_record_input(&input)?;
+    let provider = build_provider_for_account(state, &account)?;
+    let created = provider.create_record(&zone_of(domain), &input).await?;
+    insert_local_record(state, domain, &created).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1415,5 +1704,224 @@ mod tests {
             .await
             .unwrap();
         assert!(remark.is_empty());
+    }
+
+    /// 批量操作测试的公共准备：mock + 账户 + 同步出域名，返回 (app, cookie, mock, state, domain_id)。
+    async fn bulk_test_setup() -> (
+        axum::Router,
+        String,
+        crate::providers::mock::MockProvider,
+        super::super::SharedState,
+        i64,
+    ) {
+        let (state, mocks) = test_app_with_multi_mock().await;
+        let mock = mocks.get("a").unwrap().clone();
+        {
+            let mut guard = mock.state.lock().await;
+            *guard = MockState::default().with_zone("example.com");
+        }
+        let app = router(state.clone());
+        let cookie = login_for_test(&app).await;
+        let res = req(
+            &app,
+            "POST",
+            "/api/v1/accounts",
+            Some(
+                r#"{"name":"测试","provider_type":"cloudflare","credentials":{"api_token":"token-aaaa-1111","mock_id":"a"}}"#,
+            ),
+            Some(&cookie),
+        )
+        .await;
+        let account_id = body_json(res).await["id"].as_i64().unwrap();
+        req(
+            &app,
+            "POST",
+            &format!("/api/v1/accounts/{account_id}/sync"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+        wait_sync_done(&state.pool, account_id).await;
+        let domain_id: i64 = sqlx::query_scalar("SELECT id FROM domains LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        (app, cookie, mock, state, domain_id)
+    }
+
+    #[tokio::test]
+    async fn bulk_records_create_set_delete_query() {
+        let (app, cookie, mock, state, _domain_id) = bulk_test_setup().await;
+        let url = "/api/v1/records/batch";
+
+        // 无冲突创建
+        let res = req(&app, "POST", url,
+            Some(r#"{"op":"create","domain_ids":[1],"host":"site","rtype":"A","value":"1.2.3.4","ttl":600}"#),
+            Some(&cookie)).await;
+        assert_eq!(res.status(), 200);
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "created");
+        assert_eq!(body["summary"]["created"], 1);
+
+        // 冲突策略 skip：已存在则跳过，值不变
+        let res = req(&app, "POST", url,
+            Some(r#"{"op":"create","domain_ids":[1],"host":"site","rtype":"A","value":"9.9.9.9","on_conflict":"skip"}"#),
+            Some(&cookie)).await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "skipped");
+        let v: String = sqlx::query_scalar("SELECT value FROM records WHERE host = 'site'")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(v, "1.2.3.4");
+
+        // 冲突策略 update：已存在则更新
+        let res = req(&app, "POST", url,
+            Some(r#"{"op":"create","domain_ids":[1],"host":"site","rtype":"A","value":"5.5.5.5","on_conflict":"update"}"#),
+            Some(&cookie)).await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "updated");
+        let v: String = sqlx::query_scalar("SELECT value FROM records WHERE host = 'site'")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(v, "5.5.5.5");
+
+        // set：不存在则自动新增
+        let res = req(&app, "POST", url,
+            Some(r#"{"op":"set","domain_ids":[1],"host":"app","rtype":"CNAME","value":"cdn.example.net"}"#),
+            Some(&cookie)).await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "created");
+
+        // set：已存在则更新
+        let res = req(&app, "POST", url,
+            Some(r#"{"op":"set","domain_ids":[1],"host":"app","rtype":"CNAME","value":"cdn2.example.net"}"#),
+            Some(&cookie)).await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "updated");
+
+        // query：精确匹配（www2 不应命中 www）
+        req(
+            &app,
+            "POST",
+            url,
+            Some(r#"{"op":"set","domain_ids":[1],"host":"site2","rtype":"A","value":"2.2.2.2"}"#),
+            Some(&cookie),
+        )
+        .await;
+        let res = req(
+            &app,
+            "POST",
+            url,
+            Some(r#"{"op":"query","domain_ids":[1],"host":"site"}"#),
+            Some(&cookie),
+        )
+        .await;
+        let body = body_json(res).await;
+        let records = body["results"][0]["records"].as_array().unwrap();
+        assert_eq!(records.len(), 1, "site2 不应匹配 site");
+        assert_eq!(records[0]["host"], "site");
+        assert_eq!(records[0]["value"], "5.5.5.5");
+
+        // delete：不存在 → not_found
+        let res = req(
+            &app,
+            "POST",
+            url,
+            Some(r#"{"op":"delete","domain_ids":[1],"host":"test","rtype":"A","value":"1.1.1.1"}"#),
+            Some(&cookie),
+        )
+        .await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "not_found");
+
+        // delete：存在 → deleted 并回写平台
+        let res = req(
+            &app,
+            "POST",
+            url,
+            Some(r#"{"op":"delete","domain_ids":[1],"host":"site","rtype":"A","value":"1.1.1.1"}"#),
+            Some(&cookie),
+        )
+        .await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "deleted");
+        assert_eq!(body["summary"]["deleted"], 1);
+        let n: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM records WHERE host = 'site' AND rtype = 'A'")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(n, 0);
+        assert!(
+            mock.take_calls()
+                .await
+                .contains(&"delete_record".to_string())
+        );
+
+        // 部分失败不中断：域名 999 不存在 → failed，其余域名继续
+        let res = req(
+            &app,
+            "POST",
+            url,
+            Some(
+                r#"{"op":"set","domain_ids":[999,1],"host":"app2","rtype":"A","value":"3.3.3.3"}"#,
+            ),
+            Some(&cookie),
+        )
+        .await;
+        let body = body_json(res).await;
+        assert_eq!(body["results"][0]["status"], "failed");
+        assert_eq!(body["results"][1]["status"], "created");
+    }
+
+    #[tokio::test]
+    async fn bulk_records_validation_and_auth() {
+        let (app, cookie, _mock, state, domain_id) = bulk_test_setup().await;
+        let url = "/api/v1/records/batch";
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM records")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+
+        // 空域名集合 / 超限 / 非法类型 / 非法冲突策略 → 400 且不执行
+        for bad in [
+            r#"{"op":"create","domain_ids":[],"host":"a","rtype":"A","value":"1.1.1.1"}"#
+                .to_string(),
+            format!(
+                r#"{{"op":"create","domain_ids":[{}],"host":"a","rtype":"A","value":"1.1.1.1"}}"#,
+                (0..201)
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            format!(
+                r#"{{"op":"create","domain_ids":[{domain_id}],"host":"a","rtype":"PTR","value":"1.1.1.1"}}"#
+            ),
+            format!(
+                r#"{{"op":"create","domain_ids":[{domain_id}],"host":"a","rtype":"A","value":"1.1.1.1","on_conflict":"boom"}}"#
+            ),
+        ] {
+            let res = req(&app, "POST", url, Some(&bad), Some(&cookie)).await;
+            assert_eq!(res.status(), 400, "{bad}");
+        }
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM records")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        // 校验失败不应产生任何记录（mock 同步预置记录数保持不变）
+        assert_eq!(n, before, "校验失败不应产生记录");
+
+        // 未登录 → 401
+        let res = req(
+            &app,
+            "POST",
+            url,
+            Some(r#"{"op":"query","domain_ids":[1],"host":"site"}"#),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), 401);
     }
 }

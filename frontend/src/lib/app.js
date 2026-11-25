@@ -61,6 +61,46 @@ export function toast(msg, kind = "") {
   toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
 }
 
+// ---------- 确认 Toast ----------
+
+// 确认 Toast 展示队列：同一时刻至多一条，后续确认在前一条关闭后依次展示
+let confirmToastQueue = Promise.resolve();
+
+function showConfirmToast(message, { confirmText, cancelText, timeoutMs }) {
+  return new Promise((resolve) => {
+    const el = document.createElement("div");
+    el.className = "toast toast-confirm";
+    el.setAttribute("role", "alertdialog");
+    el.setAttribute("aria-label", "操作确认");
+    el.innerHTML = `
+      <div class="toast-confirm-msg">${esc(message)}</div>
+      <div class="toast-confirm-actions">
+        <button type="button" class="btn danger small" data-confirm autofocus>${esc(confirmText)}</button>
+        <button type="button" class="btn ghost small" data-cancel>${esc(cancelText)}</button>
+      </div>`;
+    const finish = (ok) => { clearTimeout(timer); el.remove(); resolve(ok); };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    el.addEventListener("click", (e) => {
+      if (e.target.closest("[data-confirm]")) finish(true);
+      else if (e.target.closest("[data-cancel]")) finish(false);
+    });
+    document.body.appendChild(el);
+    // 下一帧再加 show，确保淡入过渡生效
+    requestAnimationFrame(() => el.classList.add("show"));
+  });
+}
+
+/**
+ * 以 Toast 形式做二次确认。message 为纯文本，内部强制 esc() 转义；
+ * 返回 Promise<boolean>：确认=true，取消/超时=false。多条确认依次排队展示。
+ */
+export function confirmToast(message, { confirmText = "确认删除", cancelText = "取消", timeoutMs = 10000 } = {}) {
+  const run = confirmToastQueue.then(() => showConfirmToast(message, { confirmText, cancelText, timeoutMs }));
+  // 队列不得因单条异常而中断
+  confirmToastQueue = run.then(() => {}, () => {});
+  return run;
+}
+
 // ---------- 复制 ----------
 
 /**

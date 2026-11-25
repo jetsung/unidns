@@ -4,7 +4,7 @@ import AppLayout from '../../components/AppLayout.astro';
 
 <AppLayout title="解析记录" active="domains">
   <script>
-    import { api, esc, toast, modal, modalFrame, requireAuth, PROVIDERS, RECORD_TYPES, busy, pollRun, pager, bindPager, copyText } from '../../lib/app.js';
+    import { api, esc, toast, confirmToast, modal, modalFrame, requireAuth, PROVIDERS, RECORD_TYPES, busy, pollRun, pager, bindPager, copyText } from '../../lib/app.js';
 
     // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
     document.addEventListener('astro:page-load', () => {
@@ -264,7 +264,7 @@ import AppLayout from '../../components/AppLayout.astro';
           toast(`${enable ? '已启用' : '已停用'}记录 ${host}（已回写平台）`, 'ok');
           load();
         } else if (act === 'delete') {
-          if (!confirm(`确认删除记录「${host}」？\n\n将同时从平台删除该解析记录。`)) return;
+          if (!(await confirmToast(`确认删除记录「${host}」？\n\n将同时从平台删除该解析记录。`))) return;
           await api(`/api/v1/records/${recordId}`, { method: 'DELETE' });
           toast(`记录 ${host} 已删除（已回写平台）`, 'ok');
           load();

@@ -4,7 +4,7 @@ import AppLayout from '../components/AppLayout.astro';
 
 <AppLayout title="平台账户" active="accounts">
   <script>
-    import { api, esc, fmtTime, toast, modal, modalFrame, requireAuth, PROVIDERS, busy, pollRun, pager, bindPager } from '../lib/app.js';
+    import { api, esc, fmtTime, toast, confirmToast, modal, modalFrame, requireAuth, PROVIDERS, busy, pollRun, pager, bindPager } from '../lib/app.js';
 
     // 软导航：模块只执行一次，页面初始化由 astro:page-load 驱动（按 data-page 守卫）
     document.addEventListener('astro:page-load', () => {
@@ -226,7 +226,7 @@ import AppLayout from '../components/AppLayout.astro';
           toast(target === 'enabled' ? '账户已启用' : '账户已停用（不再参与同步）', 'ok');
           render();
         } else if (act === 'delete') {
-          if (!confirm(`确认删除账户「${name}」？\n\n仅删除本地数据（账户、域名、解析记录），不会改动平台侧任何资源。`)) return;
+          if (!(await confirmToast(`确认删除账户「${name}」？\n\n仅删除本地数据（账户、域名、解析记录），不会改动平台侧任何资源。`))) return;
           await api(`/api/v1/accounts/${id}`, { method: 'DELETE' });
           toast('账户已删除', 'ok');
           render();

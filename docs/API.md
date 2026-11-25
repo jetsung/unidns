@@ -88,6 +88,50 @@ HTTP 状态与错误码：
 
 限流时若平台返回 `Retry-After`（CloudFlare），对外附带建议重试秒数。
 
+### 2.4 批量记录操作 API（`POST /api/v1/records/batch`）
+
+域名列表页跨域名批量操作端点，单次请求对多个域名执行同一主机记录的增/删/改/查。
+逐域名串行执行，复用单记录的校验与平台回写链路；单个域名失败不中断整批。
+
+请求体：
+
+```json
+{
+  "op": "create",            // create（增，含冲突策略）| set（改，upsert）| delete（删）| query（查）
+  "domain_ids": [1, 2, 3],   // 必填，1–200 个域名 id
+  "host": "www",             // 必填，主机记录（完全匹配），根记录为 @
+  "rtype": "A",              // create/set/delete 必填；query 可省略（不限类型）
+  "value": "1.2.3.4",        // create/set/delete 必填
+  "ttl": 600,                // 可选，默认 600（create/set）
+  "on_conflict": "skip"      // 仅 create：skip（默认，跳过已存在）| update（覆盖更新为本次提交值）
+}
+```
+
+语义说明：
+
+- `create`（增）：域名下已存在同 host 同类型记录时按 `on_conflict` 处理——`skip` 跳过（保留原记录），
+  `update` 更新第一条匹配记录；同 host 同类型存在多条时仅更新第一条，结果 `reason` 中标注。
+- `set`（改）：upsert——存在即更新、不存在即自动创建，无需冲突策略。
+- `delete`（删）：精确匹配删除并回写平台；记录不存在时返回 `not_found`，不视为失败。
+- `query`（查）：主机记录完全匹配，读取本地记录视图，返回逐域名记录列表（含值、类型、TTL）。
+
+响应（逐域名结果 + 汇总）：
+
+```json
+{
+  "op": "create",
+  "summary": { "total": 3, "created": 1, "updated": 0, "deleted": 0, "skipped": 1, "not_found": 0, "failed": 1 },
+  "results": [
+    { "domain_id": 1, "domain": "example.com", "status": "created", "reason": null, "records": [] },
+    { "domain_id": 2, "domain": "test.cn",     "status": "skipped", "reason": null,  "records": [] },
+    { "domain_id": 9, "domain": null,          "status": "failed",  "reason": "域名不存在", "records": [] }
+  ]
+}
+```
+
+- `status` 取值：`created` / `updated` / `deleted` / `skipped` / `not_found` / `failed`（查询为 `ok`，`records` 携带记录列表）。
+- 请求级校验失败（域名集合为空、超过 200 个、`host` 为空、类型不支持等）返回 400 且不执行任何域名操作。
+
 ## 3. 阿里云云解析 DNS
 
 - **端点**：`https://alidns.aliyuncs.com`

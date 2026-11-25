@@ -126,6 +126,7 @@ pub fn router(state: SharedState) -> Router {
             "/records/{id}",
             axum::routing::patch(records::update_record).delete(records::delete_record),
         )
+        .route("/records/batch", axum::routing::post(records::bulk_records))
         .route(
             "/records/{id}/status",
             axum::routing::post(records::set_status),
